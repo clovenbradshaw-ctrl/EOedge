@@ -5,7 +5,7 @@
 // are never cached (they carry auth headers and are not idempotent).
 // ══════════════════════════════════════════════════════════════════════
 
-const VERSION = 'eo-local-v2-2026-04-18-pdf-idle';
+const VERSION = 'eo-local-v2-2026-04-18-opfs-busy-retry';
 const SHELL = [
   './',
   './index.html',
