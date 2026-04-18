@@ -17,7 +17,7 @@ const TRANSFORMERS_URL = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17
 // being reachable, then fall back to the upstream lexical-analysis repo.
 const EXEMPLARS_SOURCES = [
   { label: 'local',    url: new URL('../data/exemplars.json', import.meta.url).toString() },
-  { label: 'upstream', url: 'https://raw.githubusercontent.com/clovenbradshaw-ctrl/eo-lexical-analysis/main/data/exemplars.json' }
+  { label: 'upstream', url: 'https://raw.githubusercontent.com/clovenbradshaw-ctrl/eo-lexical-analysis-2.0/main/run_2026-03-19_144302/exemplars.json' }
 ];
 const TOP_N = 40;
 const MIN_MARGIN = 0.03;
