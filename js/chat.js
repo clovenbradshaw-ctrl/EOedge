@@ -288,7 +288,7 @@ function renderShell() {
       <div id="chat-composer-row" class="chat-composer-row">
         <div class="chat-dropzone" id="chat-dropzone">
           <button class="btn-upload" id="chat-upload-btn" title="Upload a document" aria-label="Upload">📎</button>
-          <input type="file" id="chat-file-input" multiple hidden accept=".txt,.md,.markdown,.csv,.json,.ndjson,.jsonl,.log">
+          <input type="file" id="chat-file-input" multiple hidden accept=".txt,.md,.markdown,.csv,.json,.ndjson,.jsonl,.log,.pdf">
           <textarea id="chat-input" class="chat-input" rows="1" placeholder="Ask something, state a fact, or drop a document here…"></textarea>
           <button id="chat-send-btn" class="btn btn-primary chat-send">Send ↵</button>
         </div>

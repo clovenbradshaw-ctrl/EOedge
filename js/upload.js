@@ -1,34 +1,35 @@
 // ══════════════════════════════════════════════════════════════════════
 // upload.js — document drop zone
 //
-// Accepts plain text, markdown, CSV, JSON text. For PDFs / DOCX we'd
-// integrate pdf.js / mammoth — out of v1 scope but the shape is the same:
-// extract text, hand to the intake pipeline.
+// Accepts plain text, markdown, CSV, JSON text, and PDF. PDF extraction
+// lazy-loads pdf.js from a CDN on first use so the main-thread boot
+// stays lean. DOCX would plug in identically via mammoth.
 // ══════════════════════════════════════════════════════════════════════
 
 import { ingest } from './intake.js';
 
-const MAX_BYTES = 4 * 1024 * 1024; // 4 MB safety cap
+const MAX_BYTES = 8 * 1024 * 1024; // 8 MB safety cap (bumped for PDFs)
 
 const EXTRACTORS = {
   'text/plain':       readAsText,
   'text/markdown':    readAsText,
   'text/csv':         readAsText,
   'application/json': readAsJSON,
-  'application/x-ndjson': readAsText
+  'application/x-ndjson': readAsText,
+  'application/pdf':  readAsPDF
 };
 
-// Supported extensions. Anything else — PDF, DOCX, images, archives — is
+// Supported extensions. Anything else — DOCX, images, archives — is
 // rejected up front instead of being read as text (which produces binary
 // garbage that the classifier then fails or NUL-gates).
-const SUPPORTED_EXTS = new Set(['txt','md','markdown','log','csv','json','ndjson','jsonl']);
+const SUPPORTED_EXTS = new Set(['txt','md','markdown','log','csv','json','ndjson','jsonl','pdf']);
 
 export async function extractText(file) {
   if (!file) throw new Error('no file');
   if (file.size > MAX_BYTES) throw new Error(`file too large (${file.size} bytes; limit ${MAX_BYTES})`);
   const ext = fileExt(file.name);
   if (!SUPPORTED_EXTS.has(ext)) {
-    throw new Error(`unsupported file type ".${ext || '?'}" — drop .txt, .md, .csv, .json, or .log`);
+    throw new Error(`unsupported file type ".${ext || '?'}" — drop .txt, .md, .csv, .json, .log, or .pdf`);
   }
   const type = file.type || inferType(ext);
   const extractor = EXTRACTORS[type] || readAsText;
@@ -44,6 +45,7 @@ function inferType(ext) {
   if (ext === 'csv') return 'text/csv';
   if (ext === 'json') return 'application/json';
   if (ext === 'ndjson' || ext === 'jsonl') return 'application/x-ndjson';
+  if (ext === 'pdf') return 'application/pdf';
   return 'text/plain';
 }
 
@@ -73,6 +75,45 @@ function flattenJSONForClassification(obj, depth = 0) {
     if (typeof v === 'object') return flattenJSONForClassification(v, depth+1);
     return '';
   }).filter(Boolean).join('\n');
+}
+
+/* ═══ PDF via pdf.js (lazy) ════════════════════════════════════════════ */
+
+const PDFJS_VERSION = '4.7.76';
+const PDFJS_MODULE = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.mjs`;
+const PDFJS_WORKER = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.mjs`;
+let _pdfjsPromise = null;
+
+function loadPdfJs() {
+  if (_pdfjsPromise) return _pdfjsPromise;
+  _pdfjsPromise = (async () => {
+    const mod = await import(/* @vite-ignore */ PDFJS_MODULE);
+    mod.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+    return mod;
+  })().catch(e => { _pdfjsPromise = null; throw e; });
+  return _pdfjsPromise;
+}
+
+async function readAsPDF(file) {
+  const pdfjs = await loadPdfJs();
+  const buf = await file.arrayBuffer();
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(buf) }).promise;
+  const pages = [];
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    // Each item is a glyph run. Join with spaces and preserve paragraph
+    // breaks where pdf.js marks end-of-line.
+    const line = content.items.map(it => {
+      const t = it.str || '';
+      return it.hasEOL ? t + '\n' : t;
+    }).join(' ');
+    pages.push(line);
+    page.cleanup?.();
+  }
+  doc.destroy?.();
+  // Collapse runs of whitespace the intake clause-splitter would choke on.
+  return pages.join('\n\n').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n');
 }
 
 /* ═══ Batch ingest with progress ═══════════════════════════════════════ */
