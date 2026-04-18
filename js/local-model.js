@@ -13,6 +13,17 @@ const MODELS = {
   'qwen-1.5b': { id: 'Qwen2.5-1.5B-Instruct-q4f16_1-MLC', label: 'Qwen 2.5 1.5B', sizeGB: 1.0 },
   'llama-1b':  { id: 'Llama-3.2-1B-Instruct-q4f16_1-MLC', label: 'Llama 3.2 1B',  sizeGB: 0.8 }
 };
+
+// WebLLM only accepts `tools` for a hand-picked set of function-calling
+// checkpoints. Everything else — including all the lightweight Qwen/Llama
+// instruct variants we ship — must emulate tool calls via prompt injection.
+const NATIVE_TOOL_MODEL_IDS = new Set([
+  'Hermes-2-Pro-Llama-3-8B-q4f16_1-MLC',
+  'Hermes-2-Pro-Llama-3-8B-q4f32_1-MLC',
+  'Hermes-2-Pro-Mistral-7B-q4f16_1-MLC',
+  'Hermes-3-Llama-3.1-8B-q4f32_1-MLC',
+  'Hermes-3-Llama-3.1-8B-q4f16_1-MLC'
+]);
 const DEFAULT_KEY = 'qwen-3b';
 const LS_PREF_KEY = 'eo-local-model-pref';
 const LS_OPTED_IN = 'eo-local-model-opted-in';
@@ -21,6 +32,9 @@ let _engine = null;
 let _loading = null;
 let _modelKey = null;
 let _progressListeners = new Set();
+// Model IDs that claimed native tool support but were rejected by WebLLM at
+// runtime — we demote them to prompt-based dispatch for the rest of the session.
+const _demotedFromNative = new Set();
 
 export function listModels() {
   return Object.entries(MODELS).map(([key, m]) => ({ key, ...m }));
@@ -53,6 +67,14 @@ export function isLoading() {
 
 export function currentModelLabel() {
   return _modelKey ? MODELS[_modelKey]?.label : null;
+}
+
+export function supportsNativeTools() {
+  if (!_modelKey) return false;
+  const id = MODELS[_modelKey]?.id;
+  if (!id) return false;
+  if (_demotedFromNative.has(id)) return false;
+  return NATIVE_TOOL_MODEL_IDS.has(id);
 }
 
 export function onProgress(listener) {
@@ -127,11 +149,28 @@ export async function unloadModel() {
 export async function complete({ messages, tools, tool_choice = 'auto', temperature = 0.3, max_tokens = 512 }) {
   if (!_engine) throw new Error('Local model not loaded.');
   const req = { messages, temperature, max_tokens };
-  if (tools && tools.length) {
+  const wantsTools = !!(tools && tools.length) && supportsNativeTools();
+  if (wantsTools) {
     req.tools = tools;
     req.tool_choice = tool_choice;
   }
-  const resp = await _engine.chat.completions.create(req);
+  let resp;
+  try {
+    resp = await _engine.chat.completions.create(req);
+  } catch(e) {
+    // Safety net: if the selected model rejects the tools field, demote it
+    // for the rest of the session and retry without tools.
+    const msg = e?.message || String(e);
+    if (req.tools && /not supported for ChatCompletionRequest\.tools/i.test(msg)) {
+      const id = MODELS[_modelKey]?.id;
+      if (id) _demotedFromNative.add(id);
+      delete req.tools;
+      delete req.tool_choice;
+      resp = await _engine.chat.completions.create(req);
+    } else {
+      throw e;
+    }
+  }
   const choice = resp.choices?.[0];
   const msg = choice?.message || {};
   return {

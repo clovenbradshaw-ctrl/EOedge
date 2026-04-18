@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════════════════════════
-// fold.js — background pattern detector for REC proposals
+// fold.js — background pattern detector for DEF-rule and REC-frame proposals
 //
 // Spec §8 calls for a Web Worker. v1 runs on the main thread via
 // requestIdleCallback — simpler and sufficient at prototype scale.
@@ -10,13 +10,14 @@
 //   • Scans the events store periodically
 //   • Detects conflict rate by target type
 //   • Detects resolution convergence (repeated user EVAs pointing the same way)
-//   • Emits REC proposals through onProposal callback
+//   • Emits proposals through onProposal callback (rule-install DEFs
+//     or frame-restructuring RECs)
 // ══════════════════════════════════════════════════════════════════════
 
 import { getEvents, subscribe, updateMetrics } from './store.js';
 import { OP_ORDER } from './ops.js';
 
-const CONFLICT_THRESHOLD = 0.3;   // DEF-to-clean ratio
+const CONFLICT_THRESHOLD = 0.3;   // DEF-to-total ratio
 const MIN_EVENTS_PER_CLASS = 4;   // don't fire on tiny samples
 const CONVERGENCE_MIN = 3;        // at least 3 user EVAs in the same direction
 const SCAN_INTERVAL_MS = 45000;   // 45 seconds when idle
@@ -26,7 +27,7 @@ let _timer = null;
 let _onProposal = null;
 let _lastScanProposalIds = new Set();
 
-/** Start the fold scheduler. onProposal(proposal) is called for each REC proposal. */
+/** Start the fold scheduler. onProposal(proposal) is called for each proposal. */
 export function start(onProposal) {
   if (_running) return;
   _running = true;
@@ -67,24 +68,24 @@ async function runScan() {
 }
 
 /* ═══ Detector 1: conflict rate ═══════════════════════════════════════
-   If a class of targets has a DEF-to-total ratio above threshold, the
+   If a class of targets has an DEF-to-total ratio above threshold, the
    frame is probably inadequate — propose a REC.
    ═══════════════════════════════════════════════════════════════════ */
 async function detectConflictRate(proposals) {
-  const defs = await getEvents({ op_code: 7 }); // DEF
+  const alts = await getEvents({ op_code: 7 }); // DEF
   const allEvents = await getEvents({});
   // Group by target type_hint (derived from the event)
   const byClass = new Map();
   for (const e of allEvents) {
     const cls = e.type_hint || e.object || 'default';
-    if (!byClass.has(cls)) byClass.set(cls, { total: 0, defs: 0, samples: [] });
+    if (!byClass.has(cls)) byClass.set(cls, { total: 0, alts: 0, samples: [] });
     const c = byClass.get(cls);
     c.total += 1;
-    if (e.op_code === 7) { c.defs += 1; c.samples.push(e); }
+    if (e.op_code === 7) { c.alts += 1; c.samples.push(e); }
   }
   for (const [cls, stats] of byClass.entries()) {
     if (stats.total < MIN_EVENTS_PER_CLASS) continue;
-    const ratio = stats.defs / stats.total;
+    const ratio = stats.alts / stats.total;
     if (ratio >= CONFLICT_THRESHOLD) {
       proposals.push({
         id: `conflict-rate:${cls}:${Math.floor(Date.now()/60000)}`, // minute-bucket id
@@ -93,8 +94,8 @@ async function detectConflictRate(proposals) {
         observed_ratio: +ratio.toFixed(2),
         threshold: CONFLICT_THRESHOLD,
         sample_size: stats.total,
-        def_count: stats.defs,
-        suggestion: `Targets of type "${cls}" show a sustained DEF-to-total ratio of ${(ratio*100).toFixed(0)}% (over ${stats.total} events). The current frame may not be distinguishing the values that are producing conflicts. Consider a REC proposal to introduce a distinguishing dimension.`,
+        alt_count: stats.alts,
+        suggestion: `Targets of type "${cls}" show a sustained DEF-to-total ratio of ${(ratio*100).toFixed(0)}% (over ${stats.total} events). The frame may not be distinguishing the multi-valued cases cleanly. Consider a REC proposal to introduce a distinguishing dimension.`,
         created_at: new Date().toISOString()
       });
     }
@@ -106,13 +107,13 @@ async function detectConflictRate(proposals) {
    targets, propose installing a deterministic rule.
    ═══════════════════════════════════════════════════════════════════ */
 async function detectResolutionConvergence(proposals) {
-  const evas = await getEvents({ op_code: 8 });
-  const userEvas = evas.filter(e => e.agent === 'user');
-  if (userEvas.length < CONVERGENCE_MIN) return;
+  const sups = await getEvents({ op_code: 8 });
+  const userSups = sups.filter(e => e.agent === 'user');
+  if (userSups.length < CONVERGENCE_MIN) return;
 
-  // For each class, look at how user resolved conflicts
+  // For each class, look at how the user has projected among multiple DEFs
   const byClass = new Map();
-  for (const e of userEvas) {
+  for (const e of userSups) {
     // The EVA operand should indicate which value won, via provenance or the chosen value
     const cls = e.type_hint || e.object || 'default';
     if (!byClass.has(cls)) byClass.set(cls, []);

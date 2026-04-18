@@ -5,13 +5,14 @@
 //   1. Input         — textarea, drop zone (mic planned for v2)
 //   2. Lattice strip — three 3×3 grids (Act, Site, Resolution)
 //   3. Stream        — scrollable list of events, current projection
-//   4. Conflicts     — DEF superpositions needing adjudication
-//   5. REC proposals — surfaced pattern detections from fold
+//   4. Multi-value   — targets with several DEF values; a later DEF can pick a winner
+//   5. Fold proposals — pattern detections (DEF rule installs or REC frame changes)
 //   6. Compute footer — live counters, GPU=0, Network=0 enforced
 // ══════════════════════════════════════════════════════════════════════
 
 import { OPS, OP_ORDER, SITE_ORDER, RESOLUTION_ORDER, OBJECT_ORDER, DOMAIN_ORDER, MODE_ORDER,
-         DESERT_CELL, siteFor, resolutionFor, phasepostNotation } from './ops.js';
+         DESERT_CELL, siteFor, resolutionFor, siteCode, resolutionCode,
+         phasepostNotation } from './ops.js';
 import { project, findConflicts, summary, actFaceCounts, siteFaceCounts, resolutionFaceCounts } from './horizon.js';
 import { ingest } from './intake.js';
 import { getMetrics, storageEstimate, clearAll, resetMetrics, appendEvent, updateMetrics } from './store.js';
@@ -272,8 +273,7 @@ export async function updateLattice() {
         const res = resolutionFor(m, o);
         const count = resMap[res] || 0;
         const isSelected = state.filter.resolution === res;
-        // Mark Desert cell (SYN × Ground = Seeding × Field but we want to mark at operator level)
-        // In the Resolution face, the cell corresponding to Seeding is valid; desert is in the full 27-cell combo.
+        // Desert (SYN × Condition) lives at the 27-cell combo; resolution face is fine on its own.
         return {
           label: res, sublabel: '',
           count, color: 'var(--violet)', tint: 'var(--violet-pale)',
@@ -426,7 +426,7 @@ function renderConflicts({ onAdjudicate }) {
     <div class="panel-head">
       <div>
         <h2 class="panel-title">Conflicts <span id="conflict-dot"></span></h2>
-        <div class="caption panel-sub" id="conflict-sub">DEF superpositions · model invoked only when no rule applies</div>
+        <div class="caption panel-sub" id="conflict-sub">Multiple DEF values for the same target · an applicable DEF rule picks which to project</div>
       </div>
     </div>
     <div class="panel-body">
@@ -459,7 +459,7 @@ function renderConflict(c) {
         <div class="mono" style="font-size:11px;color:var(--ink-faint);">target ${shortHash(c.target)}</div>
         <div class="conflict-target">${escape(c.target_form || '(unnamed)')}</div>
       </div>
-      ${resolved ? '<span class="tag">adjudicated</span>' : '<span class="tag tag-warn">superposition</span>'}
+      ${resolved ? '<span class="tag">projected</span>' : '<span class="tag">multiple values</span>'}
     </div>
     <div class="conflict-values">
       ${c.candidates.map((v, i) => `
@@ -483,8 +483,8 @@ function renderProposals() {
   el.innerHTML = `
     <div class="panel-head">
       <div>
-        <h2 class="panel-title">REC proposals</h2>
-        <div class="caption panel-sub" id="rec-sub">Frame-change suggestions surfaced by the fold · never auto-applied</div>
+        <h2 class="panel-title">Fold proposals</h2>
+        <div class="caption panel-sub" id="rec-sub">Rule-install DEFs and frame-restructuring RECs surfaced by the fold · never auto-applied</div>
       </div>
     </div>
     <div class="panel-body">
@@ -496,7 +496,7 @@ export function pushProposal(p) {
   if (state.dismissedProposalIds.has(p.id)) return;
   state.proposals = [p, ...state.proposals.filter(q => q.id !== p.id)].slice(0, 20);
   updateProposals();
-  toast(`REC proposal: ${p.kind}`);
+  toast(`Fold proposal: ${p.kind}`);
 }
 
 export function updateProposals() {
@@ -679,7 +679,7 @@ export const ui = {
       }
     }
     const winner = c.candidates[winnerIdx];
-    const evaEvent = {
+    const supEvent = {
       uuid: uuidv7(),
       ts: new Date().toISOString(),
       op_code: 8,
@@ -690,7 +690,7 @@ export const ui = {
       spo: { s: agent, p: 'adjudicated', o: String(winner.value) },
       mode: 'Relating',
       domain: 'Significance',
-      object: 'Figure',
+      object: 'Entity',
       site: 8, site_name: 'Lens',
       resolution: 5, resolution_name: 'Binding',
       frame: 'default',
@@ -698,9 +698,9 @@ export const ui = {
       clause: `Adjudication: ${JSON.stringify(winner.value)} selected over alternatives.`,
       confidence: conf,
       rationale: reason,
-      provenance: { source: agent, path: 'eva', winner_event: winner.event_uuid }
+      provenance: { source: agent, path: 'sup', winner_event: winner.event_uuid }
     };
-    await appendEvent(evaEvent);
+    await appendEvent(supEvent);
     await updateMetrics({ conflictsAdjudicated: 1 });
     toast(`Adjudicated via ${agent}: ${String(winner.value).slice(0,40)}`, 'info');
     await ui.refresh?.();
@@ -716,40 +716,45 @@ export const ui = {
       uuid: uuidv7(), ts: new Date().toISOString(), op_code: 8, operator: 'EVA',
       target: c.target, target_form: c.target_form, operand: winner.value,
       spo: { s: 'rule', p: 'adjudicated', o: String(winner.value) },
-      mode: 'Relating', domain: 'Significance', object: 'Figure',
+      mode: 'Relating', domain: 'Significance', object: 'Entity',
       site: 8, site_name: 'Lens', resolution: 5, resolution_name: 'Binding',
       frame: 'default', agent: 'rule',
       clause: `Rule ${result.ruleStrategy} resolved: ${JSON.stringify(winner.value)}`,
       confidence: 1.0, rationale: result.reason,
-      provenance: { source: 'rule', rule_id: result.ruleId, path: 'eva' }
+      provenance: { source: 'rule', rule_id: result.ruleId, path: 'sup' }
     });
     await updateMetrics({ conflictsAdjudicated: 1 });
     toast(`Resolved by rule: ${result.ruleStrategy}`, 'info');
     await ui.refresh?.();
   },
   async keepBoth(targetHash) {
-    // No event written — the superposition simply remains held.
-    toast('Superposition retained.', 'info');
+    // No event written — both DEF values simply remain in the log.
+    toast('Multiple values retained.', 'info');
   },
   async acceptProposal(id) {
     const p = state.proposals.find(x => x.id === id);
     if (!p) return;
     if (p.rule_proposal) {
       try {
-        const rule = await installRule({ ...p.rule_proposal, installedBy: 'user-rec' });
-        // Write the REC event
+        const rule = await installRule({ ...p.rule_proposal, installedBy: 'user-def' });
+        // A resolution rule is entailment — "for targets matching X, the
+        // projected value follows strategy Y" — so it's a DEF, not a REC.
+        // REC is reserved for frame restructuring.
         const anchor = makeAnchor(`rule:${rule.strategy}:${rule.id.slice(0,8)}`);
         await appendEvent({
-          uuid: uuidv7(), ts: new Date().toISOString(), op_code: 9, operator: 'REC',
+          uuid: uuidv7(), ts: new Date().toISOString(), op_code: 7, operator: 'DEF',
           target: anchor.hash, target_form: anchor.form,
           operand: rule.id,
-          spo: { s: 'fold', p: 'installed', o: rule.description },
-          mode: 'Generating', domain: 'Significance', object: 'Pattern',
-          site: 9, site_name: 'Paradigm', resolution: 9, resolution_name: 'Weaving',
+          spo: { s: 'user', p: 'defines-resolution', o: rule.description },
+          mode: 'Differentiating', domain: 'Significance', object: 'Condition',
+          site: siteCode(siteFor('Significance', 'Condition')),
+          site_name: siteFor('Significance', 'Condition'),
+          resolution: resolutionCode(resolutionFor('Differentiating', 'Condition')),
+          resolution_name: resolutionFor('Differentiating', 'Condition'),
           frame: 'default', agent: 'user',
-          clause: `REC: install rule "${rule.description}"`,
+          clause: `DEF: resolution rule "${rule.description}"`,
           confidence: 1.0, rationale: p.suggestion,
-          provenance: { source: 'user', proposal_id: id, rule_id: rule.id, path: 'rec' }
+          provenance: { source: 'user', proposal_id: id, rule_id: rule.id, path: 'def' }
         });
         await updateMetrics({ recProposalsAccepted: 1 });
         toast(`Rule installed: ${rule.description}`, 'info');

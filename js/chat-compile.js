@@ -245,7 +245,7 @@ function synOrEva(raw, anchors, time, topic, op) {
   return {
     op,
     operand: inner,
-    context: { kind: 'text', value: op === 'EVA' ? 'judgment' : 'summary' }
+    context: { kind: 'text', value: op === 'EVA' ? 'superpose' : 'summary' }
   };
 }
 

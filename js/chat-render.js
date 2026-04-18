@@ -35,10 +35,10 @@ function renderNUL(tree, result) {
   else if (reason === 'parse_fail') text = `I couldn't parse that into a request. ${result.nul.ref ? '("' + result.nul.ref + '")' : ''}`.trim();
   else if (reason === 'empty_result') text = "Nothing matches that in the log. It's either never been recorded, or it's outside the scope you named.";
   else if (reason === 'nothing_to_synthesize') text = "Nothing to summarize — the scope you named produced no events.";
-  else if (reason === 'no_conflicts_in_scope') text = "No open DEF superpositions in that scope. All values are settled.";
+  else if (reason === 'no_conflicts_in_scope') text = "No multi-valued targets in that scope.";
   else if (reason === 'no_connections') text = `No connections recorded from ${result.nul.anchor || 'that anchor'}.`;
   else if (reason === 'con_requires_anchor') text = "I need a named entity to look up connections.";
-  else if (reason === 'def_requires_term') text = "I need to know what term you want to define.";
+  else if (reason === 'alt_requires_term') text = "I need to know what term you want to assert a value for.";
   else if (reason === 'depth_exceeded') text = 'That expression nested too deep for me to evaluate safely.';
   else text = `Non-transformation: ${reason}.`;
   return { text, receipt: receiptFor(tree, result), nul: true };
@@ -98,9 +98,9 @@ function renderSYN(tree, result) {
 
 function renderDEF(tree, result) {
   const ev = result.events?.[0];
-  if (!ev) return { text: 'Definition not recorded.', receipt: receiptFor(tree, result) };
+  if (!ev) return { text: 'Assertion not recorded.', receipt: receiptFor(tree, result) };
   return {
-    text: `Defined · ${ev.target_form} means "${ev.operand}"`,
+    text: `Asserted · ${ev.target_form} = "${ev.operand}"`,
     receipt: receiptFor(tree, result),
     events: result.events
   };

@@ -1,12 +1,11 @@
 // ══════════════════════════════════════════════════════════════════════
-// rules.js — deterministic EVA rule engine
+// rules.js — deterministic DEF-value resolver
 //
-// The spec §11 example: after enough user EVAs converge on a pattern
-// (e.g. "user always picks latest value for financial figures"), the
-// fold worker proposes a REC that installs a rule. Once installed, that
-// rule resolves matching conflicts deterministically, no model call.
+// After enough user resolutions converge on a pattern (e.g. "user always
+// picks the latest value for financial figures"), the fold worker
+// proposes a REC that installs a rule. Once installed, that rule picks
+// a winner for competing DEF values deterministically — no model call.
 //
-// This module manages the rule store and dispatches rules at EVA time.
 // ══════════════════════════════════════════════════════════════════════
 
 import { getAllRules, appendRule, deactivateRule } from './store.js';
@@ -98,7 +97,7 @@ function ruleMatches(rule, targetInfo) {
 }
 
 /**
- * Try to resolve a DEF conflict using installed rules.
+ * Try to resolve competing DEF values using installed rules.
  * Returns { winnerIndex, reason, confidence, ruleId } on success,
  * or null to defer to the model.
  */
@@ -122,7 +121,8 @@ export async function tryRules(targetInfo, values, context) {
 }
 
 /**
- * Install a new rule from a REC proposal.
+ * Install a new rule. The caller usually also emits a DEF event
+ * recording the rule as entailment ("resolution for X is strategy Y").
  */
 export async function installRule({ strategy, match, config, priority, description, installedBy }) {
   if (!STRATEGIES[strategy]) {

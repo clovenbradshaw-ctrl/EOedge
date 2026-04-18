@@ -243,19 +243,19 @@ function synthesizeTemplate(events, tree) {
   return `${events.length} events ${timeRange}: ${parts.join(' · ')}. Dominant activity: ${Object.entries(byOp).sort(([,a],[,b]) => b-a)[0]?.[0] || '—'}.`;
 }
 
-/* ═══ DEF — install a frame definition ══════════════════════════════════
-   DEF(anchor:X, text:"meaning") → logs a DEF event establishing the frame
+/* ═══ DEF — assert a value within the frame ═══════════════════════════
+   DEF(anchor:X, text:"value") → logs an DEF event stating a value for X
    ═══════════════════════════════════════════════════════════════════ */
 
 async function execDEF(tree, budget, depth) {
   const term = tree.operand;
   const meaning = tree.context;
   if (!term || term.kind !== 'anchor') {
-    return { ok: true, op: 'DEF', nul: { reason: 'def_requires_term' }, cost: budget };
+    return { ok: true, op: 'DEF', nul: { reason: 'alt_requires_term' }, cost: budget };
   }
   const a = makeAnchor(term.name);
-  await upsertAnchor({ hash: a.hash, form: a.form, original: a.original, type_hint: 'Definition' });
-  const mode = 'Differentiating', domain = 'Significance', object = 'Figure';
+  await upsertAnchor({ hash: a.hash, form: a.form, original: a.original, type_hint: 'Entity' });
+  const mode = 'Differentiating', domain = 'Significance', object = 'Entity';
   const site = siteFor(domain, object);
   const res = resolutionFor(mode, object);
   const event = {
@@ -266,29 +266,29 @@ async function execDEF(tree, budget, depth) {
     target: a.hash,
     target_form: a.form,
     operand: meaning?.value || null,
-    spo: { s: 'user', p: 'defines', o: meaning?.value || '' },
+    spo: { s: 'user', p: 'asserts', o: meaning?.value || '' },
     mode, domain, object,
     site: siteCode(site), site_name: site,
     resolution: resolutionCode(res), resolution_name: res,
     frame: 'default', agent: 'user',
-    clause: `DEF: ${term.name} means "${meaning?.value || ''}"`,
+    clause: `DEF: ${term.name} = "${meaning?.value || ''}"`,
     confidence: 1.0,
-    rationale: 'User-supplied definition from chat',
-    provenance: { source: 'chat', path: 'def' }
+    rationale: 'User-asserted value from chat',
+    provenance: { source: 'chat', path: 'alt' }
   };
   await appendEvent(event);
   return {
     ok: true,
     op: 'DEF',
     events: [event],
-    notes: `Defined "${term.name}"`,
+    notes: `Asserted "${term.name}"`,
     cost: budget
   };
 }
 
-/* ═══ EVA — judgment / adjudication ════════════════════════════════════
-   EVA over a SEG-inner: narrow down to conflicts in that scope
-   EVA with conflict marker: find conflicts relevant to the scope
+/* ═══ EVA — judgment across multiple DEF values ════════════════════════
+   EVA over a SEG-inner: multi-valued targets within that scope
+   EVA with no inner: all multi-valued targets in the log
    ═══════════════════════════════════════════════════════════════════ */
 
 async function execEVA(tree, budget, depth) {
@@ -312,7 +312,7 @@ async function execEVA(tree, budget, depth) {
       op: 'EVA',
       nul: { reason: 'no_conflicts_in_scope' },
       cost: budget,
-      notes: 'No open DEF superpositions in scope.'
+      notes: 'No multi-valued targets in scope.'
     };
   }
 
@@ -332,7 +332,7 @@ async function execEVA(tree, budget, depth) {
         target_form: c.target_form,
         operand: winner.value,
         spo: { s: 'rule', p: 'adjudicated', o: String(winner.value) },
-        mode: 'Relating', domain: 'Significance', object: 'Figure',
+        mode: 'Relating', domain: 'Significance', object: 'Entity',
         site: 8, site_name: 'Lens',
         resolution: 5, resolution_name: 'Binding',
         frame: 'default',
@@ -340,7 +340,7 @@ async function execEVA(tree, budget, depth) {
         clause: `Rule ${ruleResult.ruleStrategy} resolved: ${JSON.stringify(winner.value)}`,
         confidence: ruleResult.confidence || 1.0,
         rationale: ruleResult.reason,
-        provenance: { source: 'rule', rule_id: ruleResult.ruleId, path: 'eva' }
+        provenance: { source: 'rule', rule_id: ruleResult.ruleId, path: 'sup' }
       });
       await updateMetrics({ conflictsAdjudicated: 1 });
     }

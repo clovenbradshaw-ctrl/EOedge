@@ -30,7 +30,7 @@
 //   22    2  agent_code           u16 LE
 //   24    4  frame_fingerprint    u32 LE
 //   28    1  confidence_u8        u8  (0..255, quantized from 0..1)
-//   29    1  object_code          u8  (0=Ground, 1=Figure, 2=Pattern)
+//   29    1  object_code          u8  (0=Condition, 1=Entity, 2=Pattern)
 //   30    1  flags                u8
 //   31    1  reserved             u8
 //
@@ -43,7 +43,7 @@ const MAGIC = new Uint8Array([0x45, 0x4f, 0x44, 0x42]); // "EODB"
 const VERSION = 1;
 const HEADER_SIZE = 256;
 const EVENT_SIZE = 32;
-const OBJECT_CODES = { Ground: 0, Figure: 1, Pattern: 2 };
+const OBJECT_CODES = { Condition: 0, Entity: 1, Pattern: 2 };
 const AGENT_CORE = { unknown:0, user:1, heuristic:2, model:3, rule:4, seed:5, sync:6, 'user-rec':7 };
 
 const textEnc = new TextEncoder();

@@ -31,7 +31,7 @@ Drop a `.txt`, `.md`, or `.csv` into the chat. The intake pipeline classifies ev
 Chitchat, parse failures, empty results, absent data — all surface as explicit NUL responses with a reason. The system refuses to hallucinate when the honest answer is "nothing to report".
 
 **Inspector drawer for structure.**
-Tap the grid icon in the header to open the inspector. Tabs: Intake, Faces (three 3×3 lattices), Stream (append-only Given-Log), Conflicts (DEF superpositions awaiting EVA), REC (fold-surfaced proposals). Everything that happens in chat is visible here.
+Tap the grid icon in the header to open the inspector. Tabs: Intake, Faces (three 3×3 lattices), Stream (append-only Given-Log), Multi-value (targets with several DEF values — projected when a DEF rule applies), REC (fold-surfaced proposals). Everything that happens in chat is visible here.
 
 ## What works without an API key
 
@@ -44,7 +44,7 @@ Add an Anthropic API key in the Inspector's Intake tab for those paths. Everythi
 
 ## Embedding-based classification
 
-First run, EO Local downloads `all-MiniLM-L6-v2` (~24 MB) via transformers.js, then bakes 27 centroids from the exemplars in [clovenbradshaw-ctrl/eo-lexical-analysis](https://github.com/clovenbradshaw-ctrl/eo-lexical-analysis) — the empirical work that shows the 27 cells separating in embedding space at z=+16.15. Centroids are cached in localStorage after the first bake, so subsequent loads are instant.
+First run, EO Local downloads `all-MiniLM-L6-v2` (~24 MB) via transformers.js, then bakes 27 centroids from the exemplars in [clovenbradshaw-ctrl/eo-lexical-analysis-2.0](https://github.com/clovenbradshaw-ctrl/eo-lexical-analysis-2.0) — the empirical work that shows the 27 cells separating in embedding space. Centroids are cached in localStorage after the first bake, so subsequent loads are instant.
 
 While the model is loading, the chat works with heuristic-only classification. The status bar above the message list shows load progress. If the fetch fails (offline, firewall), the chat continues with heuristic-only and notes the degradation.
 
@@ -103,10 +103,10 @@ eo-local/
     ├── ui.js               — inspector drawer content (six panels)
     ├── intake.js           — NUL gate → heuristic → model → append pipeline
     ├── horizon.js          — structural projections over the store
-    ├── fold.js             — REC proposal detector
+    ├── fold.js             — fold proposals (DEF rule installs / REC frame changes)
     ├── heuristic.js        — zero-token pattern classifier
     ├── model.js            — three-question model adapter
-    ├── rules.js            — deterministic EVA rule engine
+    ├── rules.js            — deterministic DEF-value resolver
     ├── seeds.js            — pre-classified seed events
     ├── anchor.js           — cyrb hash + UUIDv7
     ├── ops.js              — operator / site / resolution tables

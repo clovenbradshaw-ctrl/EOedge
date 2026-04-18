@@ -14,8 +14,8 @@
 //   3. Update metrics
 //
 // This is the only place where the model is allowed to be invoked from
-// the intake path. EVA adjudication and fold-worker pattern detection
-// are the only other paths that can call the model.
+// the intake path. EVA adjudication and fold-worker pattern
+// detection are the only other paths that can call the model.
 // ══════════════════════════════════════════════════════════════════════
 
 import { OPS, EMITTING, siteFor, resolutionFor, siteCode, resolutionCode, opCodeOf } from './ops.js';
@@ -62,7 +62,7 @@ export function splitIntoClauses(text) {
  *   'emitted'       — event was written to the log
  *   'nul_gated'     — non-transformation, no event written
  *   'model_failed'  — model fallback failed (no key, error); no event
- *   'low_confidence' — event written but flagged for human EVA
+ *   'low_confidence' — event written but flagged for human adjudication
  */
 export async function classifyClause(clause, options = {}) {
   const { frame = 'default', agent = 'user', context = '' } = options;
@@ -112,7 +112,7 @@ export async function classifyClause(clause, options = {}) {
           operator: r.operator,
           mode: r.mode || OPS[r.operator].mode,
           domain: r.domain || OPS[r.operator].domain,
-          object: r.object || 'Figure',
+          object: r.object || 'Entity',
           spo: r.spo,
           target: r.target || r.spo?.o || r.spo?.s || c,
           operand: r.operand || '',
@@ -232,7 +232,7 @@ function heuristicToResult(clause, heur, operator) {
     operator,
     mode: op?.mode || heur.mode,
     domain: op?.domain || heur.domain,
-    object: heur.object || 'Figure',
+    object: heur.object || 'Entity',
     spo: heur.spo || { s:'', p:'', o:'' },
     target: heur.spo?.o || heur.spo?.s || clause.slice(0, 80),
     operand: heur.spo?.o && heur.spo?.s ? heur.spo.o : '',
@@ -241,7 +241,7 @@ function heuristicToResult(clause, heur, operator) {
 }
 
 function inferTypeHint(operator, object) {
-  if (object === 'Ground') return 'Field';
+  if (object === 'Condition') return 'Field';
   if (object === 'Pattern') return 'Paradigm';
   return 'Entity';
 }

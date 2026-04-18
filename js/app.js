@@ -52,10 +52,10 @@ async function main() {
   // Store change subscription → refresh inspector surfaces
   subscribe(() => refresh());
 
-  // Fold scheduler → surfaces REC proposals into the inspector, notifies via chat
+  // Fold scheduler → surfaces proposals (DEF rule installs / REC frame changes)
   startFold((proposal) => {
     pushProposal(proposal);
-    pushSystemMessage(`⚠️ Pattern detected: ${proposal.kind} on ${proposal.target_class}. Review in Inspector → REC.`, {
+    pushSystemMessage(`⚠️ Pattern detected: ${proposal.kind} on ${proposal.target_class}. Review in Inspector → Proposals.`, {
       proposal_id: proposal.id
     });
   });

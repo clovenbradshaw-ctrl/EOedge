@@ -11,7 +11,7 @@
 //      the chat slot must trace to the tool result. Flag if not.
 // ══════════════════════════════════════════════════════════════════════
 
-import { complete } from './local-model.js';
+import { complete, supportsNativeTools } from './local-model.js';
 import { TOOL_DEFS, runTool } from './agent-tools.js';
 
 const SYSTEM_PROMPT = `You are EO Local, an on-device assistant. The user has a personal log of classified "events" (facts, observations, statements they have recorded). You can call tools to query that log.
@@ -24,6 +24,84 @@ RULES:
 - Refer to dates and times the way a person would speak ("yesterday", "April 13"), not as ISO strings.
 - Never repeat the tool's cover note verbatim — the user already sees it. Add the human take.`;
 
+function promptToolInstructions() {
+  const lines = TOOL_DEFS.map(t => {
+    const f = t.function;
+    const props = f.parameters?.properties || {};
+    const params = Object.entries(props)
+      .map(([k, v]) => `    - ${k} (${v.type || 'string'}): ${v.description || ''}`.trimEnd())
+      .join('\n');
+    return `- ${f.name}: ${f.description}${params ? '\n' + params : ''}`;
+  }).join('\n');
+  return `
+AVAILABLE TOOLS:
+${lines}
+
+TOOL-CALL PROTOCOL:
+- To call a tool, respond with ONE line of raw JSON and nothing else, shaped exactly like this example:
+  {"name": "find_events", "arguments": {"time": "yesterday"}}
+- No code fences, no <tool_call> tags, no prose before or after — the JSON object must be the entire response.
+- To answer without a tool, respond in plain prose only (no JSON anywhere).
+- After a tool result arrives, narrate it in one or two short sentences of prose. Do not emit another JSON call in the same turn.`;
+}
+
+function parsePromptToolCall(content) {
+  if (!content) return null;
+  let text = String(content).trim();
+
+  // Strip Qwen's native <tool_call>…</tool_call> wrapper if the model falls
+  // back to its trained function-calling format.
+  const tagged = text.match(/<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/i);
+  if (tagged) text = tagged[1].trim();
+
+  // Strip a single fenced code block.
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (fenced) text = fenced[1].trim();
+
+  let parsed = null;
+  try { parsed = JSON.parse(text); } catch(e) {}
+
+  if (!parsed) {
+    // Scan for the first balanced object that names a tool under any of the
+    // common keys (tool / name / tool_name / function).
+    const start = text.search(/\{[\s\S]*?"(?:tool|name|tool_name|function)"\s*:/);
+    if (start >= 0) {
+      let depth = 0, inStr = false, esc = false;
+      for (let i = start; i < text.length; i++) {
+        const ch = text[i];
+        if (esc) { esc = false; continue; }
+        if (ch === '\\') { esc = true; continue; }
+        if (ch === '"') { inStr = !inStr; continue; }
+        if (inStr) continue;
+        if (ch === '{') depth++;
+        else if (ch === '}') {
+          depth--;
+          if (depth === 0) {
+            try { parsed = JSON.parse(text.slice(start, i + 1)); } catch(e) {}
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  if (!parsed) return null;
+  const toolName = parsed.tool || parsed.name || parsed.tool_name || parsed.function;
+  if (typeof toolName !== 'string') return null;
+
+  const rawArgs = parsed.args ?? parsed.arguments ?? parsed.parameters ?? {};
+  let argsStr;
+  if (typeof rawArgs === 'string') argsStr = rawArgs;
+  else {
+    try { argsStr = JSON.stringify(rawArgs); } catch(e) { argsStr = '{}'; }
+  }
+
+  return {
+    id: `call-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    function: { name: toolName, arguments: argsStr }
+  };
+}
+
 const MAX_TURNS = 4;
 
 /**
@@ -33,8 +111,13 @@ const MAX_TURNS = 4;
  * @returns {Promise<{chat:string, mechanism:object|null, warnings:string[], usage:object}>}
  */
 export async function runTurn(userText, history = []) {
+  const useNative = supportsNativeTools();
+  const systemContent = useNative
+    ? SYSTEM_PROMPT
+    : SYSTEM_PROMPT + '\n' + promptToolInstructions();
+
   const messages = [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: systemContent },
     ...history.slice(-8),
     { role: 'user', content: userText }
   ];
@@ -46,41 +129,55 @@ export async function runTurn(userText, history = []) {
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     const reply = await complete({
       messages,
-      tools: TOOL_DEFS,
-      tool_choice: 'auto',
+      tools: useNative ? TOOL_DEFS : null,
+      tool_choice: useNative ? 'auto' : undefined,
       temperature: 0.3,
       max_tokens: 384
     });
     accumulateUsage(usageTotal, reply.usage);
 
-    if (reply.tool_calls && reply.tool_calls.length) {
-      // Append the assistant's tool-call message
-      messages.push({
-        role: 'assistant',
-        content: reply.content || '',
-        tool_calls: reply.tool_calls
-      });
-      // Run each tool, append a tool message per call
-      for (const call of reply.tool_calls) {
+    let toolCalls = reply.tool_calls && reply.tool_calls.length ? reply.tool_calls : null;
+    if (!toolCalls && !useNative) {
+      const parsed = parsePromptToolCall(reply.content);
+      if (parsed) toolCalls = [parsed];
+    }
+
+    if (toolCalls && toolCalls.length) {
+      if (useNative) {
+        messages.push({
+          role: 'assistant',
+          content: reply.content || '',
+          tool_calls: toolCalls
+        });
+      } else {
+        messages.push({ role: 'assistant', content: reply.content || '' });
+      }
+      for (const call of toolCalls) {
         const name = call.function?.name;
         let args = {};
         try { args = JSON.parse(call.function?.arguments || '{}'); }
         catch(e) { args = {}; }
         const result = await runTool(name, args);
         toolCallsRun++;
-        // First tool's mechanism becomes the panel; subsequent calls append records
         if (!mechanism) {
           mechanism = result.mechanism;
         } else {
           mechanism = mergeMechanism(mechanism, result.mechanism);
         }
-        messages.push({
-          role: 'tool',
-          tool_call_id: call.id || `${name}-${turn}`,
-          content: result.for_model || JSON.stringify(result.mechanism || {})
-        });
+        const toolBody = result.for_model || JSON.stringify(result.mechanism || {});
+        if (useNative) {
+          messages.push({
+            role: 'tool',
+            tool_call_id: call.id || `${name}-${turn}`,
+            content: toolBody
+          });
+        } else {
+          messages.push({
+            role: 'user',
+            content: `TOOL_RESULT (${name}):\n${toolBody}\n\nNow write one or two short sentences of plain prose for the user based on this result. Do NOT emit another JSON tool call.`
+          });
+        }
       }
-      // Loop again so the model narrates the tool results
       continue;
     }
 
