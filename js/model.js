@@ -12,6 +12,9 @@
 // the local inference function and keep the three exported methods stable.
 // ══════════════════════════════════════════════════════════════════════
 
+import { OPS } from './ops.js';
+import { isReady as localReady, complete as localComplete } from './local-model.js';
+
 const LS_API_KEY = 'eo-local-api-key';
 const LS_MODEL_URL = 'eo-local-model-url';
 
@@ -124,6 +127,97 @@ export async function extractArgs(clause, context = '') {
     confidence: typeof json.confidence === 'number' ? json.confidence : 0,
     rationale: json.rationale || '',
     nul_gate: !!json.nul_gate,
+    tokensIn, tokensOut
+  };
+}
+
+// ─── 7.1b Argument extraction — local (small-model) path ─────────────
+//
+// The cloud prompt asks a large model to produce a 10-field JSON object from
+// free choice over 9 operators. A 1–3B quantized local model is unreliable at
+// that shape. The heuristic has already computed SPO, target, object, and a
+// ranked candidate list — the only residual question is "which of these few
+// operators actually fits?" We reduce the model's job to a single letter.
+
+const LOCAL_FALLBACK_OPS = ['INS','DEF','EVA','CON','SEG','SYN','REC'];
+
+export function isLocalReady() {
+  try { return localReady(); } catch(e) { return false; }
+}
+
+function buildCandidates(heur) {
+  const seen = new Set();
+  const picks = [];
+  const push = (op) => { if (op && OPS[op] && !seen.has(op)) { seen.add(op); picks.push(op); } };
+  if (heur?.operator) push(heur.operator);
+  for (const [op] of (heur?.top || [])) push(op);
+  for (const op of LOCAL_FALLBACK_OPS) { if (picks.length >= 3) break; push(op); }
+  return picks.slice(0, 3);
+}
+
+/**
+ * Extract args via the on-device model. Takes the heuristic result so we can
+ * restrict the model to multiple-choice over its top candidates.
+ *
+ * @param {string} clause
+ * @param {object} heur  — the result from classifyHeuristic()
+ * @returns {Promise<{operator, target, operand, spo, mode, domain, object, confidence, rationale, nul_gate, tokensIn, tokensOut}>}
+ */
+export async function extractArgsLocal(clause, heur) {
+  if (!localReady()) throw new ModelError('NO_LOCAL', 'Local model not loaded');
+  const candidates = buildCandidates(heur);
+  const LETTERS = ['A','B','C'];
+  const lines = candidates.map((op, i) => `  ${LETTERS[i]}) ${op} — ${OPS[op].def}`);
+  const prompt = `Classify the clause into one EO operator. Pick the best candidate, or N if the clause is not a factual transformation claim (e.g. a greeting, question, or fragment).
+
+Clause: "${String(clause).replace(/"/g,'\\"')}"
+
+Candidates:
+${lines.join('\n')}
+  N) NUL — not a factual claim
+
+Respond with exactly one letter: A, B, C, or N.`;
+
+  const { content, usage } = await localComplete({
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.1,
+    max_tokens: 8
+  });
+
+  const raw = String(content || '').trim();
+  const m = raw.match(/\b([ABCN])\b/i) || raw.match(/([ABCN])/i);
+  if (!m) throw new ModelError('PARSE', `Local model output had no letter: ${raw.slice(0, 40)}`);
+  const letter = m[1].toUpperCase();
+  const tokensIn = usage?.prompt_tokens || Math.ceil(prompt.length / 4);
+  const tokensOut = usage?.completion_tokens || Math.ceil(raw.length / 4);
+
+  if (letter === 'N') {
+    return {
+      operator: '', target: '', operand: '', spo: { s:'', p:'', o:'' },
+      mode: '', domain: '', object: '',
+      confidence: 0, rationale: 'Local model marked non-transformation.',
+      nul_gate: true, tokensIn, tokensOut
+    };
+  }
+  const idx = LETTERS.indexOf(letter);
+  const operator = candidates[idx] || heur?.operator || candidates[0];
+  const op = OPS[operator];
+  const spo = heur?.spo || { s:'', p:'', o:'' };
+  const target = spo.o || spo.s || String(clause).slice(0, 80);
+  const operand = (spo.o && spo.s) ? spo.o : '';
+  // Agreement with heuristic's top pick nudges confidence upward.
+  const agree = heur?.top?.[0]?.[0] === operator;
+  return {
+    operator,
+    target,
+    operand,
+    spo,
+    mode: op.mode,
+    domain: op.domain,
+    object: heur?.object || 'Entity',
+    confidence: agree ? 0.75 : 0.65,
+    rationale: `Local model picked ${operator} from candidates [${candidates.join(', ')}].`,
+    nul_gate: false,
     tokensIn, tokensOut
   };
 }

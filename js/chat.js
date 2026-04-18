@@ -256,6 +256,7 @@ async function handleFiles(files) {
         const m = _messages.find(x => x.id === startId);
         if (!m) return;
         if (p.phase === 'reading')       m.text = `📎 Reading ${p.file}…`;
+        else if (p.phase === 'loading-local') m.text = `📎 ${p.file} · loading on-device classifier…`;
         else if (p.phase === 'classifying') m.text = `📎 Classifying ${p.file} · ${p.chars} chars`;
         else if (p.phase === 'done')     m.text = `📎 ${p.file} · ${p.emitted} events logged · ${p.nul_gated} gated${p.failed?` · ${p.failed} failed`:''}`;
         renderMessages();
