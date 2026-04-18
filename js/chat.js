@@ -13,13 +13,20 @@ import { ingestFile, attachDropZone } from './upload.js';
 import { ensureCentroids, isReady as embedReady, isLoading as embedLoading } from './embeddings.js';
 import { getMetrics, appendEvent, updateMetrics } from './store.js';
 import { uuidv7 } from './anchor.js';
+import {
+  loadModel, isReady as localReady, isLoading as localLoading,
+  hasOptedIn, hasWebGPU, listModels, getPreferredModel, setPreferredModel,
+  currentModelLabel, onProgress as onLocalProgress
+} from './local-model.js';
+import { runTurn as agentRunTurn } from './agent.js';
 
 /* ═══ State ═══════════════════════════════════════════════════════════ */
 
-const _messages = [];            // { id, role, text, receipt?, tree?, ts, events?, nul?, adjudications? }
+const _messages = [];            // { id, role, text, receipt?, tree?, ts, events?, nul?, adjudications?, mechanism? }
 let _nextId = 1;
 let _busy = false;
 let _embedStatus = null;         // { label, progress } | null
+let _localStatus = null;         // { phase, text, progress, error? } | null
 let _onTurnComplete = null;
 
 function newMessage(role, text, extras = {}) {
@@ -34,7 +41,25 @@ export function initChat({ onTurnComplete } = {}) {
   _onTurnComplete = onTurnComplete;
   renderShell();
   pushSystemGreeting();
+  pushLocalModelBanner();
   renderMessages();
+
+  onLocalProgress((p) => {
+    _localStatus = p;
+    renderLocalBanner();
+    if (p.phase === 'ready') {
+      pushSystemMessage(`On-device AI ready · ${currentModelLabel()}. All chat runs locally from now on.`);
+    } else if (p.phase === 'error') {
+      pushSystemMessage(`Could not load on-device AI: ${p.text}. Chat falls back to retrieval-only mode.`, { error: true });
+    }
+  });
+
+  // Auto-resume the model if the user opted in last session.
+  if (hasOptedIn()) {
+    hasWebGPU().then((ok) => {
+      if (ok) startLocalLoad();
+    });
+  }
 
   // Kick off embedding load in background (best-effort — system works without it).
   // Cold loads download ~24 MB of model weights on first run, so be explicit
@@ -118,20 +143,10 @@ async function respondTo(userText) {
   _busy = true;
   setComposerBusy(true);
   try {
-    const { tree, rationale } = await compile(userText, { useEmbeddings: embedReady() });
-    const result = await execute(tree);
-    const rendered = render(tree, result);
-    const msg = newMessage('assistant', rendered.text, {
-      receipt: rendered.receipt,
-      tree,
-      rationale,
-      events: rendered.events,
-      edges: rendered.edges,
-      adjudications: rendered.adjudications,
-      nul: rendered.nul
-    });
-    // After rendering, persist a metrics delta so the footer shows the tokens we actually used
-    return msg;
+    if (localReady()) {
+      return await respondViaAgent(userText);
+    }
+    return await respondViaPipeline(userText);
   } catch(e) {
     console.error('respondTo error', e);
     newMessage('assistant', `Something broke while handling that turn. (${e.message || e})`, { error: true });
@@ -139,6 +154,74 @@ async function respondTo(userText) {
     _busy = false;
     setComposerBusy(false);
   }
+}
+
+async function respondViaAgent(userText) {
+  const history = _messages
+    .filter(m => m.role === 'user' || (m.role === 'assistant' && !m.error))
+    .slice(-12)
+    .map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.text || '' }));
+  // Drop the just-added user turn (it's the current input)
+  if (history.length && history[history.length-1].content === userText) history.pop();
+
+  const result = await agentRunTurn(userText, history);
+  const msg = newMessage('assistant', result.chat || '...', {
+    mechanism: result.mechanism || null,
+    warnings: result.warnings || [],
+    via: 'local',
+    usage: result.usage
+  });
+  return msg;
+}
+
+async function respondViaPipeline(userText) {
+  const { tree, rationale } = await compile(userText, { useEmbeddings: embedReady() });
+  const result = await execute(tree);
+  const rendered = render(tree, result);
+  // Adapt the legacy pipeline output into the chat+mechanism shape.
+  const mechanism = mechanismFromLegacy(rendered, result);
+  const msg = newMessage('assistant', rendered.text, {
+    receipt: rendered.receipt,
+    tree,
+    rationale,
+    events: rendered.events,
+    edges: rendered.edges,
+    adjudications: rendered.adjudications,
+    nul: rendered.nul,
+    mechanism,
+    via: 'pipeline'
+  });
+  return msg;
+}
+
+function mechanismFromLegacy(rendered, result) {
+  const events = rendered?.events || result?.events || [];
+  if (!events.length) return null;
+  return {
+    lookup: rendered?.receipt?.notes
+      ? `${rendered.receipt.notes}.`
+      : `Pulled ${events.length} record${events.length===1?'':'s'} from the log.`,
+    result_count: events.length,
+    records: events.map(e => ({
+      id: e.uuid,
+      label: `${e.spo?.s || e.target_form || '?'} ${e.spo?.p || ''} ${e.spo?.o || e.operand || ''}`.trim(),
+      when: humanTime(e.ts),
+      where: e.site_name || '',
+      operator: e.operator,
+      clause: e.clause || ''
+    }))
+  };
+}
+
+function humanTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) {
+    return `today ${d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})}`;
+  }
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 /* ═══ File ingest ═════════════════════════════════════════════════════ */
@@ -178,6 +261,7 @@ function renderShell() {
   el.innerHTML = `
     <div class="chat-shell">
       <div id="chat-status" class="chat-status"></div>
+      <div id="local-banner" class="local-banner"></div>
       <div id="chat-messages" class="chat-messages"></div>
       <div id="chat-composer-row" class="chat-composer-row">
         <div class="chat-dropzone" id="chat-dropzone">
@@ -261,13 +345,56 @@ function renderMessage(msg) {
   const loadingClass = msg.loading ? ' msg-loading' : '';
   const receiptHTML = msg.receipt ? renderReceipt(msg) : '';
   const adjHTML = msg.adjudications ? renderAdjudications(msg) : '';
+  // Assistant turns get a mechanism panel. NULL is shown explicitly.
+  const mechHTML = msg.role === 'assistant' && !msg.error ? renderMechanism(msg) : '';
+  const warnHTML = msg.warnings && msg.warnings.length ? renderWarnings(msg) : '';
   const body = escapeHTML(msg.text).replace(/\n/g, '<br>');
   return `<div class="msg ${roleClass}${errorClass}${nulClass}${loadingClass}" data-msg-id="${msg.id}">
     <div class="msg-body">${body}</div>
+    ${warnHTML}
     ${adjHTML}
+    ${mechHTML}
     ${receiptHTML}
     <div class="msg-meta"><span class="msg-ts">${tsL}</span></div>
   </div>`;
+}
+
+function renderMechanism(msg) {
+  const m = msg.mechanism;
+  if (!m) {
+    return `<div class="mech mech-null"><span class="mech-label">No data referenced</span></div>`;
+  }
+  const summary = `<span class="mech-lookup">${escapeHTML(m.lookup || '')}</span>`;
+  const records = (m.records || []).slice(0, 50);
+  const recordsHTML = records.length === 0 ? '' : `
+    <ol class="mech-records">
+      ${records.map(r => `
+        <li class="mech-record" data-record-id="${escapeHTML(r.id || '')}">
+          <div class="mech-record-label">${escapeHTML(r.label || '')}</div>
+          <div class="mech-record-meta">
+            ${r.when ? `<span class="mech-when">${escapeHTML(r.when)}</span>` : ''}
+            ${r.where ? `<span class="mech-where">${escapeHTML(r.where)}</span>` : ''}
+            ${r.operator ? `<span class="mech-op">${escapeHTML(r.operator)}</span>` : ''}
+          </div>
+          ${r.clause ? `<div class="mech-record-clause">"${escapeHTML(r.clause)}"</div>` : ''}
+        </li>`).join('')}
+    </ol>
+    ${(m.records || []).length > records.length ? `<div class="mech-more">+${(m.records||[]).length - records.length} more</div>` : ''}
+  `;
+  return `<details class="mech">
+    <summary>${summary}</summary>
+    <div class="mech-body">${recordsHTML}</div>
+  </details>`;
+}
+
+function renderWarnings(msg) {
+  const items = msg.warnings.map(w => {
+    if (w.startsWith('unsourced_number:')) return `Mentioned a number ("${w.split(':')[1]}") that's not in the records.`;
+    if (w.startsWith('unsourced_date:'))   return `Mentioned a date ("${w.split(':')[1]}") that's not in the records.`;
+    if (w === 'agent_loop_exhausted')      return `Hit my reasoning limit on this one.`;
+    return w;
+  });
+  return `<div class="msg-warnings">${items.map(t => `<div class="msg-warning">⚠ ${escapeHTML(t)}</div>`).join('')}</div>`;
 }
 
 function renderReceipt(msg) {
@@ -365,6 +492,82 @@ function pushSystemGreeting() {
 
 I classify every turn into the nine-operator space, run it against your log, and answer from structure when I can. Tap any response to see the operator expression that produced it.`);
   renderMessages();
+}
+
+function pushLocalModelBanner() {
+  // Banner is rendered separately via renderLocalBanner() into #local-banner.
+  // This function exists so the call site reads as part of the boot sequence.
+  renderLocalBanner();
+}
+
+/* ═══ Local model banner ═══════════════════════════════════════════════ */
+
+function renderLocalBanner() {
+  const el = document.getElementById('local-banner');
+  if (!el) return;
+
+  if (localReady()) {
+    el.innerHTML = `<div class="local-banner-row ready">
+      <span class="dot ok"></span>
+      <span>On-device AI · ${escapeHTML(currentModelLabel() || 'ready')}</span>
+    </div>`;
+    return;
+  }
+
+  if (_localStatus && (_localStatus.phase === 'download' || localLoading())) {
+    const pct = Math.round((_localStatus.progress || 0) * 100);
+    el.innerHTML = `<div class="local-banner-row loading">
+      <span class="dot pending"></span>
+      <div class="local-progress-text">${escapeHTML(_localStatus.text || 'Loading on-device AI…')}</div>
+      <div class="local-progress-bar"><div class="local-progress-fill" style="width:${pct}%"></div></div>
+    </div>`;
+    return;
+  }
+
+  if (_localStatus && _localStatus.phase === 'error') {
+    el.innerHTML = `<div class="local-banner-row err">
+      <span class="dot err"></span>
+      <span>On-device AI failed: ${escapeHTML(_localStatus.text || 'unknown error')}</span>
+      <button class="local-banner-btn" id="local-retry-btn">Retry</button>
+    </div>`;
+    document.getElementById('local-retry-btn')?.addEventListener('click', startLocalLoad);
+    return;
+  }
+
+  // Idle, opt-in pitch
+  const opts = listModels().map(m =>
+    `<option value="${escapeHTML(m.key)}" ${m.key === getPreferredModel() ? 'selected' : ''}>${escapeHTML(m.label)} · ~${m.sizeGB.toFixed(1)} GB</option>`
+  ).join('');
+  el.innerHTML = `<div class="local-banner-row idle">
+    <div class="local-banner-msg">
+      <strong>Enable on-device AI</strong>
+      <span class="mute"> — one-time download, runs locally after that. Page works without it.</span>
+    </div>
+    <select id="local-model-select" class="local-model-select" aria-label="Choose model">${opts}</select>
+    <button class="local-banner-btn primary" id="local-enable-btn">Enable</button>
+  </div>`;
+  document.getElementById('local-model-select')?.addEventListener('change', (e) => {
+    setPreferredModel(e.target.value);
+  });
+  document.getElementById('local-enable-btn')?.addEventListener('click', startLocalLoad);
+}
+
+async function startLocalLoad() {
+  if (localReady() || localLoading()) return;
+  if (!(await hasWebGPU())) {
+    _localStatus = { phase: 'error', text: 'WebGPU not available in this browser. Try a recent Chrome or Edge.', progress: 0, error: true };
+    renderLocalBanner();
+    return;
+  }
+  _localStatus = { phase: 'download', text: 'Starting download…', progress: 0 };
+  renderLocalBanner();
+  try {
+    await loadModel(getPreferredModel());
+    renderLocalBanner();
+  } catch(e) {
+    _localStatus = { phase: 'error', text: e.message || String(e), progress: 0, error: true };
+    renderLocalBanner();
+  }
 }
 
 /* ═══ Helpers ══════════════════════════════════════════════════════ */
