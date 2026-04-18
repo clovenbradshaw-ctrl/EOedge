@@ -102,6 +102,12 @@ export async function loadModel(key = getPreferredModel()) {
   if (!MODELS[key]) throw new Error(`Unknown model: ${key}`);
   if (!(await hasWebGPU())) throw new Error('WebGPU not available in this browser.');
 
+  // Persist the user's choice immediately so a refresh mid-download still
+  // auto-resumes on next load. WebLLM caches weights in IndexedDB, so
+  // re-init after refresh pulls from cache rather than re-downloading.
+  setPreferredModel(key);
+  setOptedIn(true);
+
   _loading = (async () => {
     const webllm = await import('https://esm.run/@mlc-ai/web-llm@0.2.79');
     const modelId = MODELS[key].id;
@@ -116,8 +122,6 @@ export async function loadModel(key = getPreferredModel()) {
     });
     _engine = engine;
     _modelKey = key;
-    setOptedIn(true);
-    setPreferredModel(key);
     emitProgress({ phase: 'ready', text: `${MODELS[key].label} ready`, progress: 1 });
     return engine;
   })();
