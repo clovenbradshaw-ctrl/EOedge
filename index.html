@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="description" content="EO Local — on-device chat AI built on the nine-operator algebra">
+  <meta name="theme-color" content="#F5EDE0">
+  <meta name="color-scheme" content="light">
+  <title>EO Local · On-Device Chat</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-name">EO<span class="slash">//</span>Local</div>
+      <div class="brand-sub">on-device chat · nothing leaves the machine</div>
+    </div>
+    <div class="header-right">
+      <button class="btn-icon" id="btn-inspector" title="Open inspector" aria-label="Open inspector">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="3" y="3" width="7" height="7"/>
+          <rect x="14" y="3" width="7" height="7"/>
+          <rect x="3" y="14" width="7" height="7"/>
+          <rect x="14" y="14" width="7" height="7"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <section id="chat-section" class="chat-surface"></section>
+  </main>
+
+  <aside id="inspector" class="inspector" aria-hidden="true">
+    <div class="inspector-scrim" id="inspector-scrim"></div>
+    <div class="inspector-panel">
+      <div class="inspector-head">
+        <div>
+          <h2>Inspector</h2>
+          <div class="caption mute">Structure beneath the chat</div>
+        </div>
+        <button class="btn-icon" id="btn-inspector-close" aria-label="Close inspector">✕</button>
+      </div>
+      <div class="inspector-tabs">
+        <button class="tab active" data-tab="intake">Intake</button>
+        <button class="tab" data-tab="lattice">Faces</button>
+        <button class="tab" data-tab="stream">Stream</button>
+        <button class="tab" data-tab="conflicts">Conflicts</button>
+        <button class="tab" data-tab="rec">REC</button>
+      </div>
+      <div class="inspector-body">
+        <section id="intake-section" class="panel tab-panel active" data-tab-panel="intake"></section>
+        <section id="lattice-section" class="panel tab-panel" data-tab-panel="lattice"></section>
+        <section id="stream-section" class="panel tab-panel" data-tab-panel="stream"></section>
+        <section id="conflicts-section" class="panel tab-panel" data-tab-panel="conflicts"></section>
+        <section id="rec-section" class="panel tab-panel" data-tab-panel="rec"></section>
+      </div>
+    </div>
+  </aside>
+
+  <footer id="compute-footer" class="compute-footer"></footer>
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <noscript>
+    <div style="padding:40px;font-family:serif;max-width:600px;margin:40px auto;line-height:1.6;">
+      <h1>JavaScript required</h1>
+      <p>EO Local runs entirely in the browser — classification, storage, and queries all on your device. That requires JavaScript.</p>
+    </div>
+  </noscript>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

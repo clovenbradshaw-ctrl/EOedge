@@ -1,0 +1,27 @@
+{
+  "name": "EO Local",
+  "short_name": "EO Local",
+  "description": "On-device AI runtime built on the nine-operator EO algebra.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F5EDE0",
+  "theme_color": "#F5EDE0",
+  "lang": "en",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='192' height='192' viewBox='0 0 192 192'><rect width='192' height='192' fill='%23F5EDE0'/><circle cx='96' cy='96' r='60' fill='none' stroke='%230A7E8C' stroke-width='3'/><text x='96' y='112' text-anchor='middle' font-family='serif' font-size='64' font-weight='600' fill='%232C2418'>○</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='512' height='512' viewBox='0 0 512 512'><rect width='512' height='512' fill='%23F5EDE0'/><circle cx='256' cy='256' r='160' fill='none' stroke='%230A7E8C' stroke-width='8'/><text x='256' y='296' text-anchor='middle' font-family='serif' font-size='170' font-weight='600' fill='%232C2418'>○</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
