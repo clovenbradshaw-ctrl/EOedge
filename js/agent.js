@@ -22,7 +22,15 @@ RULES:
 - After a tool returns, narrate the result in one or two short sentences. Do not invent records, dates, or counts that the tool did not return. If the tool returned nothing, say so plainly.
 - Keep replies short. No markdown, no headers, no bullet lists unless the user asks. Plain prose.
 - Refer to dates and times the way a person would speak ("yesterday", "April 13"), not as ISO strings.
-- Never repeat the tool's cover note verbatim — the user already sees it. Add the human take.`;
+- Never repeat the tool's cover note verbatim — the user already sees it. Add the human take.
+
+ANTI-FABRICATION (critical):
+- NEVER invent a statement, quote, or fact and attribute it to the user. Do not write things like "User has logged…", "You said…", or "The user mentioned…" unless that text came back from a tool result you just called.
+- NEVER put quoted content in your reply unless the exact quoted string was returned by a tool.
+- NEVER describe tool calls or tool results to the user. Do not write "I called find_events", "the tool returned", "the count_events tool returned a count of…", or anything similar. Just answer in plain prose using the facts the tool gave you.
+- Do not mention tool names (find_events, count_events, recent_events, list_entities) in your reply. Ever.
+- If you have no tool result and the user's message is conversational, just answer conversationally. Do not describe a log, do not summarize the log, do not give examples of what might be in the log.
+- If you cannot answer without data and have no tool result, say "I don't have anything on that in the log yet" — do not guess.`;
 
 function promptToolInstructions() {
   const lines = TOOL_DEFS.map(t => {
@@ -104,6 +112,26 @@ function parsePromptToolCall(content) {
 
 const MAX_TURNS = 4;
 
+/* Chitchat short-circuit. Small local models (1–3B) like to treat a "Hello"
+   as a cue to fabricate example log content. Catch the obvious conversational
+   turns up front and respond without invoking the model at all. */
+const CHITCHAT_PATTERNS = [
+  /^\s*(hi|hello|hey|yo|sup|howdy)[\s.!?,]*$/i,
+  /^\s*(good\s+(morning|afternoon|evening|night))[\s.!?,]*$/i,
+  /^\s*(thanks|thank you|ty|thx|cheers)[\s.!?,]*$/i,
+  /^\s*(cool|nice|ok|okay|got it|k|kk|sure|great)[\s.!?,]*$/i,
+  /^\s*[\p{Emoji}\s.!?]+\s*$/u
+];
+
+function chitchatReply(text) {
+  const t = text.trim().toLowerCase();
+  if (/^(hi|hello|hey|yo|sup|howdy|good\s+(morning|afternoon|evening|night))/i.test(t)) {
+    return "Hi. Ask a question about your log, state a fact, or drop a document.";
+  }
+  if (/^(thanks|thank you|ty|thx|cheers)/i.test(t)) return "Sure.";
+  return "Got it.";
+}
+
 /**
  * Run one user turn through the local model.
  * @param {string} userText
@@ -111,6 +139,18 @@ const MAX_TURNS = 4;
  * @returns {Promise<{chat:string, mechanism:object|null, warnings:string[], usage:object}>}
  */
 export async function runTurn(userText, history = []) {
+  for (const p of CHITCHAT_PATTERNS) {
+    if (p.test(userText)) {
+      return {
+        chat: chitchatReply(userText),
+        mechanism: null,
+        warnings: [],
+        usage: { prompt_tokens: 0, completion_tokens: 0 },
+        tool_calls_run: 0
+      };
+    }
+  }
+
   const useNative = supportsNativeTools();
   const systemContent = useNative
     ? SYSTEM_PROMPT
@@ -184,8 +224,19 @@ export async function runTurn(userText, history = []) {
     // No tool call — this is the chat answer
     const chat = (reply.content || '').trim();
     const warnings = postCheck(chat, mechanism);
+    // If the post-check caught a fabricated quote or attribution with no
+    // backing tool result, suppress the hallucinated text entirely rather
+    // than display it to the user.
+    const fabricated = !mechanism && warnings.some(w =>
+      w === 'fabricated_attribution' ||
+      w === 'fabricated_tool_call' ||
+      w.startsWith('unsourced_quote:')
+    );
+    const safeChat = fabricated
+      ? "I don't have anything on that in the log yet. Ask me something specific, state a fact to log, or drop a document."
+      : (chat || (mechanism ? defaultNarration(mechanism) : '...'));
     return {
-      chat: chat || (mechanism ? defaultNarration(mechanism) : '...'),
+      chat: safeChat,
       mechanism,
       warnings,
       usage: usageTotal,
@@ -236,6 +287,54 @@ function postCheck(chat, mechanism) {
   const warnings = [];
   if (!chat) return warnings;
 
+  // Fabrication check: quoted strings and third-person attributions to the
+  // user must trace to a tool result. Without one, these are hallucinations.
+  const quotes = extractQuotes(chat);
+  const sourcedQuotes = new Set();
+  if (mechanism) {
+    for (const r of mechanism.records || []) {
+      if (r.clause) sourcedQuotes.add(normalizeQuote(r.clause));
+      if (r.label)  sourcedQuotes.add(normalizeQuote(r.label));
+    }
+  }
+  for (const q of quotes) {
+    if (!q) continue;
+    if (!sourcedQuotes.has(normalizeQuote(q))) warnings.push(`unsourced_quote:${q.slice(0, 80)}`);
+  }
+
+  // Third-person attribution phrases ("user has logged", "you said", etc.)
+  // are only legitimate when we actually pulled records to back them.
+  const FABRICATION_PHRASES = [
+    /\buser\s+(?:has\s+)?(?:logged|said|stated|recorded|reported|mentioned|noted)\b/i,
+    /\byou\s+(?:said|stated|logged|recorded|mentioned|reported|noted)\b/i,
+    /\bthe\s+user\s+(?:said|stated|logged|recorded|mentioned|reported|noted)\b/i,
+    /\baccording\s+to\s+(?:the\s+)?(?:user|log)\b/i
+  ];
+  const hasRecords = mechanism && (mechanism.records || []).length > 0;
+  if (!hasRecords) {
+    for (const p of FABRICATION_PHRASES) {
+      if (p.test(chat)) { warnings.push('fabricated_attribution'); break; }
+    }
+  }
+
+  // Tool-talk fabrication. Small models love to narrate imaginary tool
+  // pipelines ("the find_events tool returned a list of UFO sightings").
+  // If the model mentions a tool by name or uses "tool returned"/"tool called"
+  // phrasing AT ALL, we treat it as leaking mechanism into the chat slot —
+  // and if no real tool ran, we treat the content as fabricated outright.
+  const TOOL_TALK = [
+    /\b(?:find_events|count_events|recent_events|list_entities)\b/i,
+    /\bthe\s+tool\s+(?:returned|called|said|reported)\b/i,
+    /\b(?:I|we|you)\s+called\s+(?:the\s+)?\w*_events?\b/i,
+    /\breturned\s+a\s+(?:count|list|total)\s+of\b/i
+  ];
+  for (const p of TOOL_TALK) {
+    if (p.test(chat)) {
+      warnings.push(hasRecords ? 'tool_talk_in_reply' : 'fabricated_tool_call');
+      break;
+    }
+  }
+
   const numbersInChat = extractNumbers(chat);
   const datesInChat = extractDates(chat);
 
@@ -260,6 +359,23 @@ function postCheck(chat, mechanism) {
     if (!sourcedDates.has(d.toLowerCase())) warnings.push(`unsourced_date:${d}`);
   }
   return warnings;
+}
+
+function extractQuotes(s) {
+  const out = [];
+  // Straight and curly double quotes; require at least two words inside to
+  // avoid flagging scare-quotes on single terms.
+  const re = /["“]([^"”]{6,})["”]/g;
+  let m;
+  while ((m = re.exec(s))) {
+    const inner = m[1].trim();
+    if (/\s/.test(inner)) out.push(inner);
+  }
+  return out;
+}
+
+function normalizeQuote(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 function extractNumbers(s) {
