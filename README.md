@@ -103,7 +103,7 @@ eo-local/
     ├── ui.js               — inspector drawer content (six panels)
     ├── intake.js           — NUL gate → heuristic → model → append pipeline
     ├── horizon.js          — structural projections over the store
-    ├── fold.js             — REC proposal detector
+    ├── fold.js             — fold proposals (DEF rule installs / REC frame changes)
     ├── heuristic.js        — zero-token pattern classifier
     ├── model.js            — three-question model adapter
     ├── rules.js            — deterministic DEF-value resolver

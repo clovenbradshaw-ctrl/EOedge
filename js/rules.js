@@ -121,7 +121,8 @@ export async function tryRules(targetInfo, values, context) {
 }
 
 /**
- * Install a new rule from a REC proposal.
+ * Install a new rule. The caller usually also emits a DEF event
+ * recording the rule as entailment ("resolution for X is strategy Y").
  */
 export async function installRule({ strategy, match, config, priority, description, installedBy }) {
   if (!STRATEGIES[strategy]) {

@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════════════════════════
-// fold.js — background pattern detector for REC proposals
+// fold.js — background pattern detector for DEF-rule and REC-frame proposals
 //
 // Spec §8 calls for a Web Worker. v1 runs on the main thread via
 // requestIdleCallback — simpler and sufficient at prototype scale.
@@ -10,7 +10,8 @@
 //   • Scans the events store periodically
 //   • Detects conflict rate by target type
 //   • Detects resolution convergence (repeated user EVAs pointing the same way)
-//   • Emits REC proposals through onProposal callback
+//   • Emits proposals through onProposal callback (rule-install DEFs
+//     or frame-restructuring RECs)
 // ══════════════════════════════════════════════════════════════════════
 
 import { getEvents, subscribe, updateMetrics } from './store.js';
@@ -26,7 +27,7 @@ let _timer = null;
 let _onProposal = null;
 let _lastScanProposalIds = new Set();
 
-/** Start the fold scheduler. onProposal(proposal) is called for each REC proposal. */
+/** Start the fold scheduler. onProposal(proposal) is called for each proposal. */
 export function start(onProposal) {
   if (_running) return;
   _running = true;

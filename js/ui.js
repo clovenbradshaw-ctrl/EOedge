@@ -6,12 +6,13 @@
 //   2. Lattice strip — three 3×3 grids (Act, Site, Resolution)
 //   3. Stream        — scrollable list of events, current projection
 //   4. Multi-value   — targets with several DEF values; a later DEF can pick a winner
-//   5. REC proposals — surfaced pattern detections from fold
+//   5. Fold proposals — pattern detections (DEF rule installs or REC frame changes)
 //   6. Compute footer — live counters, GPU=0, Network=0 enforced
 // ══════════════════════════════════════════════════════════════════════
 
 import { OPS, OP_ORDER, SITE_ORDER, RESOLUTION_ORDER, OBJECT_ORDER, DOMAIN_ORDER, MODE_ORDER,
-         DESERT_CELL, siteFor, resolutionFor, phasepostNotation } from './ops.js';
+         DESERT_CELL, siteFor, resolutionFor, siteCode, resolutionCode,
+         phasepostNotation } from './ops.js';
 import { project, findConflicts, summary, actFaceCounts, siteFaceCounts, resolutionFaceCounts } from './horizon.js';
 import { ingest } from './intake.js';
 import { getMetrics, storageEstimate, clearAll, resetMetrics, appendEvent, updateMetrics } from './store.js';
@@ -482,8 +483,8 @@ function renderProposals() {
   el.innerHTML = `
     <div class="panel-head">
       <div>
-        <h2 class="panel-title">REC proposals</h2>
-        <div class="caption panel-sub" id="rec-sub">Frame-change suggestions surfaced by the fold · never auto-applied</div>
+        <h2 class="panel-title">Fold proposals</h2>
+        <div class="caption panel-sub" id="rec-sub">Rule-install DEFs and frame-restructuring RECs surfaced by the fold · never auto-applied</div>
       </div>
     </div>
     <div class="panel-body">
@@ -495,7 +496,7 @@ export function pushProposal(p) {
   if (state.dismissedProposalIds.has(p.id)) return;
   state.proposals = [p, ...state.proposals.filter(q => q.id !== p.id)].slice(0, 20);
   updateProposals();
-  toast(`REC proposal: ${p.kind}`);
+  toast(`Fold proposal: ${p.kind}`);
 }
 
 export function updateProposals() {
@@ -735,20 +736,25 @@ export const ui = {
     if (!p) return;
     if (p.rule_proposal) {
       try {
-        const rule = await installRule({ ...p.rule_proposal, installedBy: 'user-rec' });
-        // Write the REC event
+        const rule = await installRule({ ...p.rule_proposal, installedBy: 'user-def' });
+        // A resolution rule is entailment — "for targets matching X, the
+        // projected value follows strategy Y" — so it's a DEF, not a REC.
+        // REC is reserved for frame restructuring.
         const anchor = makeAnchor(`rule:${rule.strategy}:${rule.id.slice(0,8)}`);
         await appendEvent({
-          uuid: uuidv7(), ts: new Date().toISOString(), op_code: 9, operator: 'REC',
+          uuid: uuidv7(), ts: new Date().toISOString(), op_code: 7, operator: 'DEF',
           target: anchor.hash, target_form: anchor.form,
           operand: rule.id,
-          spo: { s: 'fold', p: 'installed', o: rule.description },
-          mode: 'Generating', domain: 'Significance', object: 'Pattern',
-          site: 9, site_name: 'Paradigm', resolution: 9, resolution_name: 'Composing',
+          spo: { s: 'user', p: 'defines-resolution', o: rule.description },
+          mode: 'Differentiating', domain: 'Significance', object: 'Condition',
+          site: siteCode(siteFor('Significance', 'Condition')),
+          site_name: siteFor('Significance', 'Condition'),
+          resolution: resolutionCode(resolutionFor('Differentiating', 'Condition')),
+          resolution_name: resolutionFor('Differentiating', 'Condition'),
           frame: 'default', agent: 'user',
-          clause: `REC: install rule "${rule.description}"`,
+          clause: `DEF: resolution rule "${rule.description}"`,
           confidence: 1.0, rationale: p.suggestion,
-          provenance: { source: 'user', proposal_id: id, rule_id: rule.id, path: 'rec' }
+          provenance: { source: 'user', proposal_id: id, rule_id: rule.id, path: 'def' }
         });
         await updateMetrics({ recProposalsAccepted: 1 });
         toast(`Rule installed: ${rule.description}`, 'info');
