@@ -14,7 +14,7 @@
 //   3. Update metrics
 //
 // This is the only place where the model is allowed to be invoked from
-// the intake path. ALT-value adjudication and fold-worker pattern
+// the intake path. EVA adjudication and fold-worker pattern
 // detection are the only other paths that can call the model.
 // ══════════════════════════════════════════════════════════════════════
 

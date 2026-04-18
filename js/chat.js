@@ -450,7 +450,7 @@ function attachMessageHandlers() {
           uuid: uuidv7(),
           ts: new Date().toISOString(),
           op_code: 8,
-          operator: 'SUP',
+          operator: 'EVA',
           target: adj.target_hash,
           target_form: adj.target,
           operand: winner.value,

@@ -4,7 +4,7 @@
 // Per spec §7, the tiny model is asked three bounded questions:
 //   1. Argument extraction    — operator + target + operand from a clause
 //   2. Resolution-face stance — the Mode × Object grain
-//   3. SUP adjudication       — pick among superposed values
+//   3. EVA adjudication       — pick among superposed values
 //
 // This module defines the interface. The current adapter calls the
 // Anthropic API with structured JSON output. To swap in ONNX Runtime Web
@@ -88,8 +88,8 @@ INS  (Generating × Existence)         · instantiating a concrete thing
 SEG  (Differentiating × Structure)    · partitioning, boundary-drawing
 CON  (Relating × Structure)           · establishing a relationship
 SYN  (Generating × Structure)         · synthesizing an emergent whole
-ALT  (Differentiating × Significance) · changing value within the frame
-SUP  (Relating × Significance)        · holding contradictions simultaneously
+DEF  (Differentiating × Significance) · changing value within the frame
+EVA  (Relating × Significance)        · holding contradictions simultaneously
 REC  (Generating × Significance)      · changing the frame itself
 
 Q1 · Mode: Differentiating | Relating | Generating
@@ -100,7 +100,7 @@ Q3 · Object: Condition | Entity | Pattern
 ${context ? `Context (for reference only, do not classify):\n"${context.replace(/"/g,'\\"')}"\n\n` : ''}Clause: "${clause.replace(/"/g,'\\"')}"
 
 Return JSON only, no code fence, no prose:
-{"operator":"NUL|SIG|INS|SEG|CON|SYN|ALT|SUP|REC","target":"concise noun phrase","operand":"what it becomes or acts with, or empty","spo":{"s":"subject","p":"predicate","o":"object-or-empty"},"mode":"...","domain":"...","object":"Condition|Entity|Pattern","confidence":0.85,"rationale":"one short sentence","nul_gate":false}
+{"operator":"NUL|SIG|INS|SEG|CON|SYN|DEF|EVA|REC","target":"concise noun phrase","operand":"what it becomes or acts with, or empty","spo":{"s":"subject","p":"predicate","o":"object-or-empty"},"mode":"...","domain":"...","object":"Condition|Entity|Pattern","confidence":0.85,"rationale":"one short sentence","nul_gate":false}
 
 If the input is not a transformation claim, set nul_gate=true and leave other fields as empty strings or zeros.`;
 
@@ -158,9 +158,9 @@ export async function classifyResolution(clause, operator) {
   };
 }
 
-// ─── 7.3 SUP adjudication ──────────────────────────────────────────────
+// ─── 7.3 EVA adjudication ──────────────────────────────────────────────
 
-const ADJUDICATE_PROMPT = (target, values, context) => `You are an EO SUP adjudicator. Several ALT values for the same target are held in superposition. Choose which one should be displayed. The others remain in the log — this is not a delete; it is a projection choice.
+const ADJUDICATE_PROMPT = (target, values, context) => `You are an EO EVA adjudicator. Several DEF values exist for the same target. Choose which one should be projected. The others remain in the log — this is not a delete; it is a projection choice rendered against the current frame.
 
 Target: ${target}
 
@@ -170,7 +170,7 @@ ${values.map((v, i) => `  [${i}] ${JSON.stringify(v.value)} · source: ${v.sourc
 ${context ? `Neighboring context:\n${context}\n\n` : ''}Return JSON only:
 {"winner_index":0,"reason":"short explanation (≤ 20 tokens)","confidence":0.85}`;
 
-export async function adjudicateSUP(target, values, context = '') {
+export async function adjudicateEVA(target, values, context = '') {
   const { json, tokensIn, tokensOut } = await callModel(ADJUDICATE_PROMPT(target, values, context), 120);
   return {
     winnerIndex: typeof json.winner_index === 'number' ? json.winner_index : 0,
@@ -185,7 +185,7 @@ export async function adjudicateSUP(target, values, context = '') {
 /**
  * Free-prose call for SYN operator paths. Input is an already-classified
  * event set plus a directive; output is short natural-language prose.
- * Unlike extractArgs/classifyResolution/adjudicateSUP this doesn't return
+ * Unlike extractArgs/classifyResolution/adjudicateEVA this doesn't return
  * structured JSON — the model is answering in bounded prose because the
  * caller (chat-execute SYN) needs prose.
  *

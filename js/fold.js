@@ -9,16 +9,16 @@
 // What it does:
 //   • Scans the events store periodically
 //   • Detects conflict rate by target type
-//   • Detects resolution convergence (repeated user SUPs pointing the same way)
+//   • Detects resolution convergence (repeated user EVAs pointing the same way)
 //   • Emits REC proposals through onProposal callback
 // ══════════════════════════════════════════════════════════════════════
 
 import { getEvents, subscribe, updateMetrics } from './store.js';
 import { OP_ORDER } from './ops.js';
 
-const CONFLICT_THRESHOLD = 0.3;   // ALT-to-total ratio
+const CONFLICT_THRESHOLD = 0.3;   // DEF-to-total ratio
 const MIN_EVENTS_PER_CLASS = 4;   // don't fire on tiny samples
-const CONVERGENCE_MIN = 3;        // at least 3 user SUPs in the same direction
+const CONVERGENCE_MIN = 3;        // at least 3 user EVAs in the same direction
 const SCAN_INTERVAL_MS = 45000;   // 45 seconds when idle
 
 let _running = false;
@@ -67,11 +67,11 @@ async function runScan() {
 }
 
 /* ═══ Detector 1: conflict rate ═══════════════════════════════════════
-   If a class of targets has an ALT-to-total ratio above threshold, the
+   If a class of targets has an DEF-to-total ratio above threshold, the
    frame is probably inadequate — propose a REC.
    ═══════════════════════════════════════════════════════════════════ */
 async function detectConflictRate(proposals) {
-  const alts = await getEvents({ op_code: 7 }); // ALT
+  const alts = await getEvents({ op_code: 7 }); // DEF
   const allEvents = await getEvents({});
   // Group by target type_hint (derived from the event)
   const byClass = new Map();
@@ -94,7 +94,7 @@ async function detectConflictRate(proposals) {
         threshold: CONFLICT_THRESHOLD,
         sample_size: stats.total,
         alt_count: stats.alts,
-        suggestion: `Targets of type "${cls}" show a sustained ALT-to-total ratio of ${(ratio*100).toFixed(0)}% (over ${stats.total} events). The current frame may not be distinguishing the values that are producing superpositions. Consider a REC proposal to introduce a distinguishing dimension.`,
+        suggestion: `Targets of type "${cls}" show a sustained DEF-to-total ratio of ${(ratio*100).toFixed(0)}% (over ${stats.total} events). The frame may not be distinguishing the multi-valued cases cleanly. Consider a REC proposal to introduce a distinguishing dimension.`,
         created_at: new Date().toISOString()
       });
     }
@@ -102,7 +102,7 @@ async function detectConflictRate(proposals) {
 }
 
 /* ═══ Detector 2: resolution convergence ═══════════════════════════════
-   If a user's SUP choices consistently go the same way for a class of
+   If a user's EVA choices consistently go the same way for a class of
    targets, propose installing a deterministic rule.
    ═══════════════════════════════════════════════════════════════════ */
 async function detectResolutionConvergence(proposals) {
@@ -110,10 +110,10 @@ async function detectResolutionConvergence(proposals) {
   const userSups = sups.filter(e => e.agent === 'user');
   if (userSups.length < CONVERGENCE_MIN) return;
 
-  // For each class, look at how user resolved superpositions
+  // For each class, look at how the user has projected among multiple DEFs
   const byClass = new Map();
   for (const e of userSups) {
-    // The SUP operand should indicate which value won, via provenance or the chosen value
+    // The EVA operand should indicate which value won, via provenance or the chosen value
     const cls = e.type_hint || e.object || 'default';
     if (!byClass.has(cls)) byClass.set(cls, []);
     byClass.get(cls).push(e);

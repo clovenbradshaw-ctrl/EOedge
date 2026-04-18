@@ -1,14 +1,14 @@
 // ══════════════════════════════════════════════════════════════════════
-// ops.js — canonical EO constants (2.0 phasepost ontology)
+// ops.js — canonical EO constants (nine-operator closed set)
 // Nine operators, the 27-cell map, and helpers for three-face notation.
 // ══════════════════════════════════════════════════════════════════════
 
 /**
  * The nine operators in helix order (position = op_code enum).
- * Significance triad is 2.0:
- *   ALT at pos 7 (Diff × Sig · change value within the frame)
- *   SUP at pos 8 (Rel × Sig  · hold contradictions simultaneously)
- *   REC at pos 9 (Gen × Sig  · change the frame itself)
+ * The set is closed and fixed. Significance triad:
+ *   DEF at pos 7 (Diff × Sig · sets terms, entailment)
+ *   EVA at pos 8 (Rel × Sig  · renders judgment, satisfaction)
+ *   REC at pos 9 (Gen × Sig  · frame restructuring)
  */
 export const OPS = {
   NUL: { code: 1, glyph: '∅', name: 'Non-transformation', mode: 'Differentiating', domain: 'Existence',    role: 'Condition', triad: 'Existence',    color: '#8A8175', tint: '#E8E2D6', def: 'State passes through unchanged. Observation without action.' },
@@ -17,16 +17,16 @@ export const OPS = {
   SEG: { code: 4, glyph: '｜', name: 'Segmentation',      mode: 'Differentiating', domain: 'Structure',    role: 'Condition', triad: 'Structure',    color: '#4A9BA7', tint: '#CEE4E8', def: 'Draw a boundary. Partition, filter, group.' },
   CON: { code: 5, glyph: '⤫', name: 'Connection',         mode: 'Relating',        domain: 'Structure',    role: 'Entity',    triad: 'Structure',    color: '#0A7E8C', tint: '#BDDDE2', def: 'Establish a relationship between differentiated entities.' },
   SYN: { code: 6, glyph: '△', name: 'Synthesis',          mode: 'Generating',      domain: 'Structure',    role: 'Pattern',   triad: 'Structure',    color: '#065D68', tint: '#ADD0D6', def: 'Produce an emergent whole not reducible to its parts.' },
-  ALT: { code: 7, glyph: '⊢', name: 'Alteration',         mode: 'Differentiating', domain: 'Significance', role: 'Condition', triad: 'Significance', color: '#9E7BB8', tint: '#E0D4EB', def: 'Change value within the frame. Differentiate among alternatives.' },
-  SUP: { code: 8, glyph: '⊨', name: 'Superposition',      mode: 'Relating',        domain: 'Significance', role: 'Entity',    triad: 'Significance', color: '#7D4F9E', tint: '#D4C4E2', def: 'Hold contradictions simultaneously. Relate values without collapse.' },
-  REC: { code: 9, glyph: '⊛', name: 'Recursion',          mode: 'Generating',      domain: 'Significance', role: 'Pattern',   triad: 'Significance', color: '#B84A62', tint: '#EFCBD4', def: 'Change the frame itself. Schema migration, reframing.' }
+  DEF: { code: 7, glyph: '⊢', name: 'Definition',         mode: 'Differentiating', domain: 'Significance', role: 'Condition', triad: 'Significance', color: '#9E7BB8', tint: '#E0D4EB', def: 'Set terms and entailment. Establish what holds and what follows.' },
+  EVA: { code: 8, glyph: '⊨', name: 'Evaluation',         mode: 'Relating',        domain: 'Significance', role: 'Entity',    triad: 'Significance', color: '#7D4F9E', tint: '#D4C4E2', def: 'Render judgment. Measure satisfaction against the current definition.' },
+  REC: { code: 9, glyph: '⊛', name: 'Recursion',          mode: 'Generating',      domain: 'Significance', role: 'Pattern',   triad: 'Significance', color: '#B84A62', tint: '#EFCBD4', def: 'Restructure the frame itself. Schema migration, reframing.' }
 };
 
-export const OP_ORDER = ['NUL','SIG','INS','SEG','CON','SYN','ALT','SUP','REC'];
+export const OP_ORDER = ['NUL','SIG','INS','SEG','CON','SYN','DEF','EVA','REC'];
 export const OP_BY_CODE = OP_ORDER.reduce((m, k, i) => (m[i+1] = k, m), {});
 
 /** Operators that emit Given-Log entries (SIG and NUL do not). */
-export const EMITTING = new Set(['INS','SEG','CON','SYN','ALT','SUP','REC']);
+export const EMITTING = new Set(['INS','SEG','CON','SYN','DEF','EVA','REC']);
 
 /** Site face (Domain × Object) — the nine terrains. */
 export const SITES = {

@@ -17,7 +17,7 @@ import { ingest } from './intake.js';
 import { findConflicts } from './horizon.js';
 import { tryRules } from './rules.js';
 import { OPS, opCodeOf, siteFor, resolutionFor, siteCode, resolutionCode } from './ops.js';
-import { adjudicateSUP, hasApiKey, extractArgs, summarize } from './model.js';
+import { adjudicateEVA, hasApiKey, extractArgs, summarize } from './model.js';
 
 const TREE_DEPTH_LIMIT = 8;
 
@@ -32,8 +32,8 @@ export async function execute(tree, { depth = 0, budget = { events_scanned: 0, t
     case 'SEG': return execSEG(tree, budget, depth);
     case 'CON': return execCON(tree, budget, depth);
     case 'SYN': return execSYN(tree, budget, depth);
-    case 'ALT': return execALT(tree, budget, depth);
-    case 'SUP': return execSUP(tree, budget, depth);
+    case 'DEF': return execDEF(tree, budget, depth);
+    case 'EVA': return execEVA(tree, budget, depth);
     case 'REC': return execREC(tree, budget, depth);
     default:    return { ok: false, op: tree.op, nul: { reason: 'unknown_op' }, cost: budget };
   }
@@ -243,15 +243,15 @@ function synthesizeTemplate(events, tree) {
   return `${events.length} events ${timeRange}: ${parts.join(' · ')}. Dominant activity: ${Object.entries(byOp).sort(([,a],[,b]) => b-a)[0]?.[0] || '—'}.`;
 }
 
-/* ═══ ALT — assert a value within the frame ═══════════════════════════
-   ALT(anchor:X, text:"value") → logs an ALT event stating a value for X
+/* ═══ DEF — assert a value within the frame ═══════════════════════════
+   DEF(anchor:X, text:"value") → logs an DEF event stating a value for X
    ═══════════════════════════════════════════════════════════════════ */
 
-async function execALT(tree, budget, depth) {
+async function execDEF(tree, budget, depth) {
   const term = tree.operand;
   const meaning = tree.context;
   if (!term || term.kind !== 'anchor') {
-    return { ok: true, op: 'ALT', nul: { reason: 'alt_requires_term' }, cost: budget };
+    return { ok: true, op: 'DEF', nul: { reason: 'alt_requires_term' }, cost: budget };
   }
   const a = makeAnchor(term.name);
   await upsertAnchor({ hash: a.hash, form: a.form, original: a.original, type_hint: 'Entity' });
@@ -262,7 +262,7 @@ async function execALT(tree, budget, depth) {
     uuid: uuidv7(),
     ts: new Date().toISOString(),
     op_code: 7,
-    operator: 'ALT',
+    operator: 'DEF',
     target: a.hash,
     target_form: a.form,
     operand: meaning?.value || null,
@@ -271,7 +271,7 @@ async function execALT(tree, budget, depth) {
     site: siteCode(site), site_name: site,
     resolution: resolutionCode(res), resolution_name: res,
     frame: 'default', agent: 'user',
-    clause: `ALT: ${term.name} = "${meaning?.value || ''}"`,
+    clause: `DEF: ${term.name} = "${meaning?.value || ''}"`,
     confidence: 1.0,
     rationale: 'User-asserted value from chat',
     provenance: { source: 'chat', path: 'alt' }
@@ -279,19 +279,19 @@ async function execALT(tree, budget, depth) {
   await appendEvent(event);
   return {
     ok: true,
-    op: 'ALT',
+    op: 'DEF',
     events: [event],
     notes: `Asserted "${term.name}"`,
     cost: budget
   };
 }
 
-/* ═══ SUP — hold/reconcile contradictions ══════════════════════════════
-   SUP over a SEG-inner: narrow down to superposed values in that scope
-   SUP with no inner: find all open superpositions
+/* ═══ EVA — judgment across multiple DEF values ════════════════════════
+   EVA over a SEG-inner: multi-valued targets within that scope
+   EVA with no inner: all multi-valued targets in the log
    ═══════════════════════════════════════════════════════════════════ */
 
-async function execSUP(tree, budget, depth) {
+async function execEVA(tree, budget, depth) {
   // Execute inner to get candidate events (or, if inner is null, use full conflict scan)
   let scopeEvents = [];
   if (tree.operand) {
@@ -309,10 +309,10 @@ async function execSUP(tree, budget, depth) {
   if (!relevant.length) {
     return {
       ok: true,
-      op: 'SUP',
+      op: 'EVA',
       nul: { reason: 'no_conflicts_in_scope' },
       cost: budget,
-      notes: 'No open ALT superpositions in scope.'
+      notes: 'No multi-valued targets in scope.'
     };
   }
 
@@ -321,13 +321,13 @@ async function execSUP(tree, budget, depth) {
   for (const c of relevant) {
     const ruleResult = await tryRules({ hash: c.target, form: c.target_form }, c.candidates);
     if (ruleResult) {
-      // Rule matched — write the SUP event now so the conflict is actually closed
+      // Rule matched — write the EVA event now so the conflict is actually closed
       const winner = c.candidates[ruleResult.winnerIndex];
       await appendEvent({
         uuid: uuidv7(),
         ts: new Date().toISOString(),
         op_code: 8,
-        operator: 'SUP',
+        operator: 'EVA',
         target: c.target,
         target_form: c.target_form,
         operand: winner.value,
@@ -354,7 +354,7 @@ async function execSUP(tree, budget, depth) {
   }
   return {
     ok: true,
-    op: 'SUP',
+    op: 'EVA',
     adjudications,
     notes: `${relevant.length} conflict${relevant.length===1?'':'s'} in scope · ${adjudications.filter(a => a.resolution).length} resolvable by rule`,
     cost: budget

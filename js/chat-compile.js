@@ -19,7 +19,7 @@
 //   { op: 'NUL', reason, ref? }              non-transformation request
 //
 // Canonical string form for receipts:
-//   SUP(SEG(anchor:Maria, time:last_week), text:closed)
+//   EVA(SEG(anchor:Maria, time:last_week), text:closed)
 //   NUL(chitchat)
 //   INS(clause:"Maria closed James's referral")
 // ══════════════════════════════════════════════════════════════════════
@@ -149,16 +149,16 @@ export async function compile(text, { useEmbeddings = false } = {}) {
            || /^([\w\s]+?)\s+means\s+(.+)$/i.exec(raw)
            || /^([\w\s]+?)\s+is defined as\s+(.+)$/i.exec(raw);
     if (m) {
-      tree = { op: 'ALT', operand: { kind: 'anchor', name: m[1].trim() }, context: { kind: 'text', value: m[2].trim() } };
+      tree = { op: 'DEF', operand: { kind: 'anchor', name: m[1].trim() }, context: { kind: 'text', value: m[2].trim() } };
     } else {
       tree = nul('parse_fail', 'define without clear subject/definition');
     }
   } else if (sig === 'reframe') {
     tree = { op: 'REC', operand: { kind: 'clause', value: raw } };
   } else if (sig === 'summary') {
-    tree = synOrSup(raw, anchors, time, topic, 'SYN');
+    tree = synOrEva(raw, anchors, time, topic, 'SYN');
   } else if (sig === 'decision' || sig === 'conflict') {
-    tree = synOrSup(raw, anchors, time, topic, 'SUP');
+    tree = synOrEva(raw, anchors, time, topic, 'EVA');
   } else if (sig === 'relation') {
     tree = conTree(raw, anchors, time, topic);
   } else if (sig === 'query') {
@@ -238,14 +238,14 @@ function conTree(raw, anchors, time, topic) {
   return { op: 'CON', operand: primary, context: inner };
 }
 
-function synOrSup(raw, anchors, time, topic, op) {
-  // Use SEG as inner narrowing, then apply SYN or SUP as outer judgment
+function synOrEva(raw, anchors, time, topic, op) {
+  // Use SEG as inner narrowing, then apply SYN or EVA as outer judgment
   const inner = segTree(raw, anchors, time, topic);
   if (inner.op === 'NUL') return inner;
   return {
     op,
     operand: inner,
-    context: { kind: 'text', value: op === 'SUP' ? 'superpose' : 'summary' }
+    context: { kind: 'text', value: op === 'EVA' ? 'superpose' : 'summary' }
   };
 }
 
@@ -257,9 +257,9 @@ function treeFromClassification(cls, raw, anchors, time, topic) {
     case 'INS': return { op: 'INS', operand: { kind: 'clause', value: raw } };
     case 'SEG': return segTree(raw, anchors, time, topic);
     case 'CON': return conTree(raw, anchors, time, topic);
-    case 'SYN': return synOrSup(raw, anchors, time, topic, 'SYN');
-    case 'ALT': return { op: 'ALT', operand: { kind: 'clause', value: raw } };
-    case 'SUP': return synOrSup(raw, anchors, time, topic, 'SUP');
+    case 'SYN': return synOrEva(raw, anchors, time, topic, 'SYN');
+    case 'DEF': return { op: 'DEF', operand: { kind: 'clause', value: raw } };
+    case 'EVA': return synOrEva(raw, anchors, time, topic, 'EVA');
     case 'REC': return { op: 'REC', operand: { kind: 'clause', value: raw } };
     default: return nul('embed:unknown', raw);
   }

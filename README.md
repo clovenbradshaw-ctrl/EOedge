@@ -19,7 +19,7 @@ A chat interface. Type a question, a statement, or drop a document. Every respon
 "What did Maria do last week?" compiles to `SEG(SEG(anchor:Maria, time:last_week))`. The tree walks the store via typed-array scans, returns matching events, renders a summary. Zero tokens. Sub-millisecond on 100k events.
 
 **Statements run through the classification pipeline.**
-"Maria closed James's referral this morning" compiles to `INS(clause:"…")`. The intake pipeline splits, classifies, anchors, and appends events to the log. The reply is a receipt: `Logged · SUP(Binding, Lens) on James's referral`.
+"Maria closed James's referral this morning" compiles to `INS(clause:"…")`. The intake pipeline splits, classifies, anchors, and appends events to the log. The reply is a receipt: `Logged · EVA(Binding, Lens) on James's referral`.
 
 **Document drops are batch classification.**
 Drop a `.txt`, `.md`, or `.csv` into the chat. The intake pipeline classifies every clause and appends events. The reply summarises what was added and by what operator distribution.
@@ -31,14 +31,14 @@ Drop a `.txt`, `.md`, or `.csv` into the chat. The intake pipeline classifies ev
 Chitchat, parse failures, empty results, absent data — all surface as explicit NUL responses with a reason. The system refuses to hallucinate when the honest answer is "nothing to report".
 
 **Inspector drawer for structure.**
-Tap the grid icon in the header to open the inspector. Tabs: Intake, Faces (three 3×3 lattices), Stream (append-only Given-Log), Conflicts (ALT superpositions awaiting SUP), REC (fold-surfaced proposals). Everything that happens in chat is visible here.
+Tap the grid icon in the header to open the inspector. Tabs: Intake, Faces (three 3×3 lattices), Stream (append-only Given-Log), Multi-value (targets with several DEF values — projected when a DEF rule applies), REC (fold-surfaced proposals). Everything that happens in chat is visible here.
 
 ## What works without an API key
 
 The entire chat interface. Queries, statements, document upload, heuristic classification, rule-based adjudication. The model is only invoked when:
 
 1. The heuristic classifier can't confidently classify a clause during intake.
-2. The chat's SEG/CON/SYN/SUP dispatch reaches a synthesis step with no rule match.
+2. The chat's SEG/CON/SYN/EVA dispatch reaches a synthesis step with no rule match.
 
 Add an Anthropic API key in the Inspector's Intake tab for those paths. Everything else works with zero network traffic.
 
@@ -65,8 +65,8 @@ chat-execute.js
     │  result = 7 events, 2ms, 0 tokens
     ▼
 chat-render.js
-    │  "7 events last week — 5 SUP, 1 CON, 1 ALT.
-    │   · Mon 9:14 · SUP · Maria ▸ closed ▸ James's referral
+    │  "7 events last week — 5 EVA, 1 CON, 1 DEF.
+    │   · Mon 9:14 · EVA · Maria ▸ closed ▸ James's referral
     │   …"
     │  receipt = SEG(…) · 7 scanned · 0 tokens
     ▼
@@ -77,8 +77,8 @@ Every operator in the tree dispatches to existing runtime modules:
 - `SEG` → `store.getEvents`
 - `CON` → graph edge lookup
 - `SYN` → event aggregation + optional model synthesis
-- `ALT` → append ALT event + upsert anchor
-- `SUP` → `rules.tryRules`, then fall back to user adjudication inline
+- `DEF` → append DEF event + upsert anchor
+- `EVA` → `rules.tryRules`, then fall back to user adjudication inline
 - `REC` → surface proposal
 - `INS` → `intake.ingest` pipeline
 - `NUL` → propagate absence with reason
@@ -106,7 +106,7 @@ eo-local/
     ├── fold.js             — REC proposal detector
     ├── heuristic.js        — zero-token pattern classifier
     ├── model.js            — three-question model adapter
-    ├── rules.js            — deterministic ALT-value resolver
+    ├── rules.js            — deterministic DEF-value resolver
     ├── seeds.js            — pre-classified seed events
     ├── anchor.js           — cyrb hash + UUIDv7
     ├── ops.js              — operator / site / resolution tables

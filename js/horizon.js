@@ -118,20 +118,21 @@ export async function resolutionFaceCounts(filter = {}) {
 }
 
 /**
- * Detect ALT superpositions: targets with multiple ALT events whose
- * operand values differ, with no subsequent superseding SUP by an
- * agent-level actor.
+ * Find multi-valued targets: anchors with multiple DEF events whose
+ * operand values differ. Multi-value is not a problem by itself — this
+ * just surfaces the set so a later DEF rule, or the user, can pick a
+ * projection. Marks whether an EVA has already chosen a winner.
  */
 export async function findConflicts() {
-  const { events: alts } = await project({ operator: 'ALT', _silent: true, limit: 1e9 });
+  const { events: alts } = await project({ operator: 'DEF', _silent: true, limit: 1e9 });
   // Group by target anchor
   const byTarget = new Map();
   for (const e of alts) {
     if (!byTarget.has(e.target)) byTarget.set(e.target, []);
     byTarget.get(e.target).push(e);
   }
-  // Also fetch SUP events to find which superpositions have been resolved
-  const { events: sups } = await project({ operator: 'SUP', _silent: true, limit: 1e9 });
+  // Also fetch EVA events to find which superpositions have been resolved
+  const { events: sups } = await project({ operator: 'EVA', _silent: true, limit: 1e9 });
   const resolvedTargets = new Set();
   for (const e of sups) {
     if (e.agent === 'user' || e.agent === 'rule') resolvedTargets.add(e.target);

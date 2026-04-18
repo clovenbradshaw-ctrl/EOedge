@@ -1,10 +1,10 @@
 // ══════════════════════════════════════════════════════════════════════
-// rules.js — deterministic ALT-value resolver
+// rules.js — deterministic DEF-value resolver
 //
 // After enough user resolutions converge on a pattern (e.g. "user always
 // picks the latest value for financial figures"), the fold worker
 // proposes a REC that installs a rule. Once installed, that rule picks
-// a winner for competing ALT values deterministically — no model call.
+// a winner for competing DEF values deterministically — no model call.
 //
 // ══════════════════════════════════════════════════════════════════════
 
@@ -97,7 +97,7 @@ function ruleMatches(rule, targetInfo) {
 }
 
 /**
- * Try to resolve competing ALT values using installed rules.
+ * Try to resolve competing DEF values using installed rules.
  * Returns { winnerIndex, reason, confidence, ruleId } on success,
  * or null to defer to the model.
  */

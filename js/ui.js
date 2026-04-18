@@ -5,7 +5,7 @@
 //   1. Input         — textarea, drop zone (mic planned for v2)
 //   2. Lattice strip — three 3×3 grids (Act, Site, Resolution)
 //   3. Stream        — scrollable list of events, current projection
-//   4. Conflicts     — ALT superpositions needing adjudication
+//   4. Multi-value   — targets with several DEF values; a later DEF can pick a winner
 //   5. REC proposals — surfaced pattern detections from fold
 //   6. Compute footer — live counters, GPU=0, Network=0 enforced
 // ══════════════════════════════════════════════════════════════════════
@@ -16,7 +16,7 @@ import { project, findConflicts, summary, actFaceCounts, siteFaceCounts, resolut
 import { ingest } from './intake.js';
 import { getMetrics, storageEstimate, clearAll, resetMetrics, appendEvent, updateMetrics } from './store.js';
 import { loadSeeds } from './seeds.js';
-import { setApiKey, getApiKey, hasApiKey, adjudicateSUP as modelAdjudicate } from './model.js';
+import { setApiKey, getApiKey, hasApiKey, adjudicateEVA as modelAdjudicate } from './model.js';
 import { tryRules, installRule, availableStrategies } from './rules.js';
 import { uuidv7, shortHash, makeAnchor } from './anchor.js';
 
@@ -425,7 +425,7 @@ function renderConflicts({ onAdjudicate }) {
     <div class="panel-head">
       <div>
         <h2 class="panel-title">Conflicts <span id="conflict-dot"></span></h2>
-        <div class="caption panel-sub" id="conflict-sub">ALT superpositions · model invoked only when no rule applies</div>
+        <div class="caption panel-sub" id="conflict-sub">Multiple DEF values for the same target · an applicable DEF rule picks which to project</div>
       </div>
     </div>
     <div class="panel-body">
@@ -444,7 +444,7 @@ export async function updateConflicts() {
   dot.innerHTML = open.length ? `<span class="conflict-indicator">${open.length}</span>` : '';
 
   if (!conflicts.length) {
-    list.innerHTML = `<div class="empty quiet">No ALT conflicts in the log.</div>`;
+    list.innerHTML = `<div class="empty quiet">No DEF conflicts in the log.</div>`;
     return;
   }
   list.innerHTML = conflicts.map(renderConflict).join('');
@@ -458,7 +458,7 @@ function renderConflict(c) {
         <div class="mono" style="font-size:11px;color:var(--ink-faint);">target ${shortHash(c.target)}</div>
         <div class="conflict-target">${escape(c.target_form || '(unnamed)')}</div>
       </div>
-      ${resolved ? '<span class="tag">adjudicated</span>' : '<span class="tag tag-warn">superposition</span>'}
+      ${resolved ? '<span class="tag">projected</span>' : '<span class="tag">multiple values</span>'}
     </div>
     <div class="conflict-values">
       ${c.candidates.map((v, i) => `
@@ -682,7 +682,7 @@ export const ui = {
       uuid: uuidv7(),
       ts: new Date().toISOString(),
       op_code: 8,
-      operator: 'SUP',
+      operator: 'EVA',
       target: c.target,
       target_form: c.target_form,
       operand: winner.value,
@@ -712,7 +712,7 @@ export const ui = {
     if (!result) return toast('No installed rule matches this target.', 'info');
     const winner = c.candidates[result.winnerIndex];
     await appendEvent({
-      uuid: uuidv7(), ts: new Date().toISOString(), op_code: 8, operator: 'SUP',
+      uuid: uuidv7(), ts: new Date().toISOString(), op_code: 8, operator: 'EVA',
       target: c.target, target_form: c.target_form, operand: winner.value,
       spo: { s: 'rule', p: 'adjudicated', o: String(winner.value) },
       mode: 'Relating', domain: 'Significance', object: 'Entity',
@@ -727,8 +727,8 @@ export const ui = {
     await ui.refresh?.();
   },
   async keepBoth(targetHash) {
-    // No event written — the superposition simply remains held.
-    toast('Superposition retained.', 'info');
+    // No event written — both DEF values simply remain in the log.
+    toast('Multiple values retained.', 'info');
   },
   async acceptProposal(id) {
     const p = state.proposals.find(x => x.id === id);

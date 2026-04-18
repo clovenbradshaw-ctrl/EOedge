@@ -10,11 +10,11 @@ const SEEDS = [
   {
     clause: "Maria closed James's mental-health referral.",
     spo: { s: "Maria", p: "closed", o: "James's mental-health referral" },
-    operator: "NUL",  // NUL doesn't emit — loadSeeds converts to ALT(inactive) since an observable transition happened
+    operator: "NUL",  // NUL doesn't emit — loadSeeds converts to EVA(inactive) since an observable transition happened
     mode: "Relating", domain: "Significance", object: "Entity",
     operand: "inactive",
     confidence: 0.84,
-    rationale: "Referral status transitions from open to closed — a value move within the case-status frame."
+    rationale: "Referral status transitions from open to closed — judgment rendered against the case-status definition."
   },
   {
     clause: "Dr. Chen registered a new patient in the intake system.",
@@ -55,31 +55,31 @@ const SEEDS = [
   {
     clause: "The CRM's Q3 revenue is $4.2M.",
     spo: { s: "The CRM", p: "reports", o: "Q3 revenue of $4.2M" },
-    operator: "ALT",
+    operator: "DEF",
     mode: "Differentiating", domain: "Significance", object: "Entity",
     operand: "4.2M",
     confidence: 0.88,
     agent: "source:crm",
-    rationale: "A value is asserted for Q3 revenue under the CRM frame — one alternative among possible values."
+    rationale: "A value is set for Q3 revenue under the CRM frame."
   },
   {
     clause: "The finance team's manual count puts Q3 revenue at $3.9M.",
     spo: { s: "The finance team", p: "counts", o: "Q3 revenue at $3.9M" },
-    operator: "SUP",
-    mode: "Relating", domain: "Significance", object: "Entity",
+    operator: "DEF",
+    mode: "Differentiating", domain: "Significance", object: "Entity",
     operand: "3.9M",
     confidence: 0.86,
     agent: "source:manual",
-    rationale: "A competing value is held for the same target under the manual-count frame. Superposition — both held simultaneously."
+    rationale: "Another DEF for the same target under a different frame. Multiple values coexist; a later DEF can define which wins."
   },
   {
     clause: "The intake form status moved from pending to active.",
     spo: { s: "The intake form status", p: "moved", o: "from pending to active" },
-    operator: "ALT",
-    mode: "Differentiating", domain: "Significance", object: "Entity",
+    operator: "EVA",
+    mode: "Relating", domain: "Significance", object: "Entity",
     operand: "active",
     confidence: 0.88,
-    rationale: "Value changes within the case-status frame — alternation between pending and active."
+    rationale: "Status transition — judgment rendered against the current definition."
   },
   {
     clause: "The department restructured its client classification from two tiers into five.",
@@ -130,8 +130,8 @@ export async function loadSeeds({ frame = 'default' } = {}) {
 
   for (let i = 0; i < SEEDS.length; i++) {
     const s = SEEDS[i];
-    // Convert the NUL seed into an ALT (since NUL never emits)
-    const op = s.operator === 'NUL' ? 'ALT' : s.operator;
+    // Convert the NUL seed into an EVA (since NUL never emits, and this is a transition)
+    const op = s.operator === 'NUL' ? 'EVA' : s.operator;
     const opData = OPS[op];
     if (!opData) continue;
 

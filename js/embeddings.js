@@ -30,8 +30,8 @@ const OP_MAP = {
   SEG: { mode: 'Differentiating', domain: 'Structure' },
   CON: { mode: 'Relating',        domain: 'Structure' },
   SYN: { mode: 'Generating',      domain: 'Structure' },
-  ALT: { mode: 'Differentiating', domain: 'Significance' },
-  SUP: { mode: 'Relating',        domain: 'Significance' },
+  DEF: { mode: 'Differentiating', domain: 'Significance' },
+  EVA: { mode: 'Relating',        domain: 'Significance' },
   REC: { mode: 'Generating',      domain: 'Significance' }
 };
 

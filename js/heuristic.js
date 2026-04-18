@@ -48,28 +48,25 @@ const VERB_FAMILIES = {
     patterns: [/\b(merged|combined|integrated|consolidated|unified|fused)\s+(?:\w+\s+){0,5}into\s+\w+/i],
     weight: 1.0
   },
-  ALT: {
+  DEF: {
+    verbs: ['defined', 'defines', 'define', 'set', 'sets', 'specified', 'specifies', 'declared', 'declares',
+            'established that', 'assigned the value', 'stated', 'states',
+            'holds', 'asserted', 'asserts'],
+    // "X is Y" — terms being set
+    patterns: [/\b(?:is|are|was|were)\s+(?:defined as|declared|set to|equal to)\b/i],
+    weight: 0.9
+  },
+  EVA: {
     verbs: ['moved', 'moves', 'changed', 'changes', 'updated', 'updates', 'update',
             'transitioned', 'transitions', 'shifted', 'shifts', 'altered', 'alters',
             'revised', 'revises', 'switched', 'switches', 'adjusted', 'adjusts',
             'modified', 'modifies', 'upgraded', 'downgraded', 'promoted', 'demoted',
             'became', 'becomes',
-            'defined', 'defines', 'define', 'set', 'sets', 'specified', 'specifies', 'declared', 'declares',
-            'stated', 'states', 'holds', 'asserted', 'asserts'],
-    patterns: [/\bfrom\s+\w+(?:\s+\w+)?\s+to\s+\w+/i, // "from X to Y" value transition
+            'met', 'meets', 'satisfied', 'satisfies', 'passed', 'passes', 'failed', 'fails'],
+    patterns: [/\bfrom\s+\w+(?:\s+\w+)?\s+to\s+\w+/i, // "from X to Y" status transition
                /\b(restated|revalued|adjusted)\b/i,
-               /\b(?:is|are|was|were)\s+(?:defined as|declared|set to|equal to)\b/i],
+               /\b(?:meets|satisfies|fails|falls\s+short\s+of)\s+(?:the|its|our)?\s*\w+/i], // EVA: judgment against definition
     weight: 1.0
-  },
-  SUP: {
-    verbs: ['weighed', 'weighs', 'reconciled', 'reconciles', 'balanced', 'balances',
-            'contrasted', 'contrasts', 'juxtaposed', 'juxtaposes', 'superposed', 'superposes',
-            'held', 'holds'],
-    // Contradictions held simultaneously ("disagree on", "both X and Y")
-    patterns: [/\b(?:disagree|conflict|differ|contradict)\s+(?:on|about)\b/i,
-               /\bboth\s+\w+\s+and\s+\w+\b/i,
-               /\b(?:tension|trade[- ]off|competing)\s+(?:between|with)\b/i],
-    weight: 0.9
   },
   REC: {
     verbs: ['restructured', 'restructures', 'reframed', 'reframes', 'reorganized', 'reorganizes',
@@ -275,10 +272,10 @@ export function classifyHeuristic(clause) {
   // Derive mode and domain from operator
   const OP_MODE = { NUL:'Differentiating', SIG:'Relating', INS:'Generating',
                     SEG:'Differentiating', CON:'Relating', SYN:'Generating',
-                    ALT:'Differentiating', SUP:'Relating', REC:'Generating' };
+                    DEF:'Differentiating', EVA:'Relating', REC:'Generating' };
   const OP_DOMAIN = { NUL:'Existence', SIG:'Existence', INS:'Existence',
                       SEG:'Structure', CON:'Structure', SYN:'Structure',
-                      ALT:'Significance', SUP:'Significance', REC:'Significance' };
+                      DEF:'Significance', EVA:'Significance', REC:'Significance' };
 
   return {
     operator: bestOp,
