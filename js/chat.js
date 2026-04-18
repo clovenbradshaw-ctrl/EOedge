@@ -426,6 +426,10 @@ function renderWarnings(msg) {
   const items = msg.warnings.map(w => {
     if (w.startsWith('unsourced_number:')) return `Mentioned a number ("${w.split(':')[1]}") that's not in the records.`;
     if (w.startsWith('unsourced_date:'))   return `Mentioned a date ("${w.split(':')[1]}") that's not in the records.`;
+    if (w.startsWith('unsourced_quote:'))  return `Quoted text ("${w.slice('unsourced_quote:'.length)}") that doesn't appear in any record — suppressed.`;
+    if (w === 'fabricated_attribution')    return `Attributed a statement to you that wasn't in the log — suppressed.`;
+    if (w === 'fabricated_tool_call')      return `Described a tool call that didn't happen — suppressed.`;
+    if (w === 'tool_talk_in_reply')        return `Mentioned internal tool names in the reply.`;
     if (w === 'agent_loop_exhausted')      return `Hit my reasoning limit on this one.`;
     return w;
   });
