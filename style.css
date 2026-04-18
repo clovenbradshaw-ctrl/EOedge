@@ -141,25 +141,54 @@ button { cursor: pointer; }
 }
 .chat-status {
   padding: 0;
-  height: 0;
+  max-height: 0;
   overflow: hidden;
-  transition: height 0.2s;
+  transition: max-height 0.25s ease-out;
 }
-.chat-status.visible { height: 28px; padding: 4px 0; }
+.chat-status.visible {
+  max-height: 80px;
+  padding: 10px 12px;
+  margin: 10px 0 0;
+  background: var(--teal-pale);
+  border: 1px solid var(--teal);
+  border-radius: var(--radius);
+}
 .status-inner {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--ink-faint);
+  font-size: 12px;
+  color: var(--teal-deep);
+  font-weight: 500;
 }
-.status-inner.err { color: var(--rose); }
+.status-inner::before {
+  content: '';
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--teal);
+  border-top-color: transparent;
+  animation: status-spin 0.9s linear infinite;
+}
+.status-inner.err {
+  color: var(--rose);
+}
+.status-inner.err::before {
+  border-color: var(--rose);
+  border-top-color: transparent;
+  animation: none;
+}
+.chat-status.visible:has(.err) {
+  background: var(--rose-pale);
+  border-color: var(--rose);
+}
 .status-bar {
   flex: 1;
-  height: 2px;
-  background: var(--paper-shadow);
-  border-radius: 1px;
+  height: 4px;
+  background: rgba(10, 126, 140, 0.18);
+  border-radius: 2px;
   overflow: hidden;
 }
 .status-fill {
@@ -168,6 +197,50 @@ button { cursor: pointer; }
   transition: width 0.3s;
 }
 .status-inner.err .status-fill { background: var(--rose); }
+@keyframes status-spin { to { transform: rotate(360deg); } }
+
+/* ─── BOOT SPLASH ─── */
+.boot-splash {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 60px 20px;
+  margin: auto;
+  text-align: center;
+  color: var(--ink-mid);
+}
+.boot-ring {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 3px solid var(--paper-shadow);
+  border-top-color: var(--teal);
+  animation: status-spin 0.9s linear infinite;
+}
+.boot-title {
+  font-family: var(--font-serif);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.boot-sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* Loading-state system message (embedding load in progress) */
+.msg-sys.msg-loading {
+  background: var(--teal-pale);
+  border: 1px solid var(--teal);
+  border-style: solid;
+  color: var(--teal-deep);
+  font-style: normal;
+}
 
 .chat-messages {
   flex: 1;
