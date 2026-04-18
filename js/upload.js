@@ -18,16 +18,28 @@ const EXTRACTORS = {
   'application/x-ndjson': readAsText
 };
 
+// Supported extensions. Anything else — PDF, DOCX, images, archives — is
+// rejected up front instead of being read as text (which produces binary
+// garbage that the classifier then fails or NUL-gates).
+const SUPPORTED_EXTS = new Set(['txt','md','markdown','log','csv','json','ndjson','jsonl']);
+
 export async function extractText(file) {
   if (!file) throw new Error('no file');
   if (file.size > MAX_BYTES) throw new Error(`file too large (${file.size} bytes; limit ${MAX_BYTES})`);
-  const type = file.type || inferType(file.name);
+  const ext = fileExt(file.name);
+  if (!SUPPORTED_EXTS.has(ext)) {
+    throw new Error(`unsupported file type ".${ext || '?'}" — drop .txt, .md, .csv, .json, or .log`);
+  }
+  const type = file.type || inferType(ext);
   const extractor = EXTRACTORS[type] || readAsText;
   return extractor(file);
 }
 
-function inferType(name) {
-  const ext = (name.split('.').pop() || '').toLowerCase();
+function fileExt(name) {
+  return (String(name || '').split('.').pop() || '').toLowerCase();
+}
+
+function inferType(ext) {
   if (['md','markdown','txt','log'].includes(ext)) return 'text/plain';
   if (ext === 'csv') return 'text/csv';
   if (ext === 'json') return 'application/json';
