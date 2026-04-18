@@ -52,14 +52,16 @@
         <button class="btn-icon" id="btn-inspector-close" aria-label="Close inspector">✕</button>
       </div>
       <div class="inspector-tabs">
-        <button class="tab active" data-tab="intake">Intake</button>
+        <button class="tab active" data-tab="uploads">Uploads</button>
+        <button class="tab" data-tab="intake">Intake</button>
         <button class="tab" data-tab="lattice">Faces</button>
         <button class="tab" data-tab="stream">Stream</button>
         <button class="tab" data-tab="conflicts">Conflicts</button>
         <button class="tab" data-tab="rec">REC</button>
       </div>
       <div class="inspector-body">
-        <section id="intake-section" class="panel tab-panel active" data-tab-panel="intake"></section>
+        <section id="uploads-section" class="panel tab-panel active" data-tab-panel="uploads"></section>
+        <section id="intake-section" class="panel tab-panel" data-tab-panel="intake"></section>
         <section id="lattice-section" class="panel tab-panel" data-tab-panel="lattice"></section>
         <section id="stream-section" class="panel tab-panel" data-tab-panel="stream"></section>
         <section id="conflicts-section" class="panel tab-panel" data-tab-panel="conflicts"></section>

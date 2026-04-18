@@ -6,9 +6,12 @@
 // stays lean. DOCX would plug in identically via mammoth.
 // ══════════════════════════════════════════════════════════════════════
 
-import { ingest } from './intake.js';
 import { hasApiKey } from './model.js';
 import { hasOptedIn as localOptedIn, isReady as localReady, isLoading as localLoading, loadModel as loadLocalModel } from './local-model.js';
+import { uuidv7 } from './anchor.js';
+import { createDoc, appendRecord } from './upload-log.js';
+import { runPipeline } from './upload-pipeline.js';
+import { isLLMOnly } from './run-mode.js';
 
 const MAX_BYTES = 8 * 1024 * 1024; // 8 MB safety cap (bumped for PDFs)
 
@@ -121,52 +124,104 @@ async function readAsPDF(file) {
 /* ═══ Batch ingest with progress ═══════════════════════════════════════ */
 
 /**
- * Run ingestion on a file. Progress callback fires per batch of clauses.
- * Returns summary: { file, chars, clauses, emitted, nul_gated, failed }.
+ * Run ingestion on a file. Drives the nine-stage helix pipeline and emits
+ * typed stage events into the upload-log. The Uploads panel is a
+ * projection over that log.
+ *
+ * In llm-only mode: extract text only, skip the pipeline. The caller gets
+ * { text } back so it can hand the text straight to the LLM.
+ *
+ * Legacy onProgress callback still fires with { phase: 'reading' | ... }
+ * so existing chat-message updates keep working.
  */
-export async function ingestFile(file, onProgress) {
-  onProgress?.({ phase: 'reading', file: file.name });
-  const text = await extractText(file);
-  // If no cloud key is configured but the user opted into the on-device model,
-  // make sure it's ready before intake starts — otherwise ambiguous clauses
-  // fall through to the heuristic-only path for the entire document.
+export async function ingestFile(file, onProgress, options = {}) {
+  const doc_id = options.doc_id || uuidv7();
+  const mode = isLLMOnly() ? 'llm-only' : 'eo';
+
+  onProgress?.({ phase: 'reading', file: file.name, doc_id, mode });
+
+  // Record the doc up front so the panel shows it immediately.
+  createDoc({ doc_id, name: file.name, size: file.size, mime: file.type, mode });
+
+  let text;
+  try {
+    text = await extractText(file);
+  } catch(e) {
+    appendRecord(doc_id, { stage: '_pipeline', status: 'failed', overall: 'failed', error: e.message || String(e) });
+    throw e;
+  }
+
+  if (mode === 'llm-only') {
+    // No stages run — the text is the artifact. Mark the pipeline as skipped
+    // so the panel reads "LLM-only mode, nine stages bypassed."
+    appendRecord(doc_id, { stage: '_pipeline', status: 'done', overall: 'done', summary: 'LLM-only mode · helix bypassed' });
+    onProgress?.({
+      phase: 'done', file: file.name, doc_id, mode,
+      chars: text.length, clauses: 0, emitted: 0, nul_gated: 0, failed: 0, llm_only: true, text
+    });
+    return {
+      doc_id, mode, file: file.name, chars: text.length, text,
+      clauses: 0, emitted: 0, nul_gated: 0, failed: 0, events: []
+    };
+  }
+
+  // EO mode: make sure a classifier is available before DEF runs.
   if (!hasApiKey() && localOptedIn() && !localReady()) {
-    onProgress?.({ phase: 'loading-local', file: file.name });
+    onProgress?.({ phase: 'loading-local', file: file.name, doc_id });
     try {
       if (!localLoading()) await loadLocalModel();
       else {
-        // Another caller is loading; poll readiness briefly so intake sees it.
         const start = Date.now();
         while (!localReady() && Date.now() - start < 60_000) {
           await new Promise(r => setTimeout(r, 500));
         }
       }
     } catch(e) {
-      // Fall through — intake will degrade to heuristic-only for this file.
+      // DEF will degrade to heuristic-only for this file.
     }
   }
-  onProgress?.({ phase: 'classifying', file: file.name, chars: text.length });
-  // The intake pipeline already splits into clauses; we let it run fully
-  const results = await ingest(text, { frame: 'default', agent: 'import', source: file.name });
-  const emitted = results.filter(r => r.status === 'emitted' || r.status === 'low_confidence');
-  const gated = results.filter(r => r.status === 'nul_gated');
-  const failed = results.filter(r => r.status === 'error' || r.status === 'model_failed');
+
+  onProgress?.({ phase: 'classifying', file: file.name, chars: text.length, doc_id });
+
+  let artifacts;
+  try {
+    artifacts = await runPipeline({
+      doc_id,
+      name: file.name,
+      mime: file.type,
+      size_bytes: file.size,
+      text,
+      file,
+      frame: options.frame || 'default',
+      agent: options.agent || 'import'
+    });
+  } catch(e) {
+    onProgress?.({ phase: 'done', file: file.name, doc_id, error: e.message || String(e), failed: 1, emitted: 0, nul_gated: 0, clauses: 0 });
+    throw e;
+  }
+
+  const def = artifacts.DEF || { events: [], nul_gated: 0, failed: 0, total_clauses: 0 };
   onProgress?.({
     phase: 'done',
     file: file.name,
-    clauses: results.length,
-    emitted: emitted.length,
-    nul_gated: gated.length,
-    failed: failed.length
+    doc_id,
+    mode,
+    clauses: def.total_clauses,
+    emitted: def.events.length,
+    nul_gated: def.nul_gated,
+    failed: def.failed
   });
   return {
+    doc_id,
+    mode,
     file: file.name,
     chars: text.length,
-    clauses: results.length,
-    emitted: emitted.length,
-    nul_gated: gated.length,
-    failed: failed.length,
-    events: emitted.map(r => r.event)
+    clauses: def.total_clauses,
+    emitted: def.events.length,
+    nul_gated: def.nul_gated,
+    failed: def.failed,
+    events: def.events,
+    artifacts
   };
 }
 

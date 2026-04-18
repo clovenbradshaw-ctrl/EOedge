@@ -8,11 +8,24 @@
 // ══════════════════════════════════════════════════════════════════════
 
 const MODELS = {
-  'qwen-3b':   { id: 'Qwen2.5-3B-Instruct-q4f16_1-MLC',   label: 'Qwen 2.5 3B',   sizeGB: 1.9 },
-  'llama-3b':  { id: 'Llama-3.2-3B-Instruct-q4f16_1-MLC', label: 'Llama 3.2 3B',  sizeGB: 1.8 },
-  'qwen-1.5b': { id: 'Qwen2.5-1.5B-Instruct-q4f16_1-MLC', label: 'Qwen 2.5 1.5B', sizeGB: 1.0 },
-  'llama-1b':  { id: 'Llama-3.2-1B-Instruct-q4f16_1-MLC', label: 'Llama 3.2 1B',  sizeGB: 0.8 }
+  'qwen-3b':   { id: 'Qwen2.5-3B-Instruct-q4f16_1-MLC',   label: 'Qwen 2.5 3B',   sizeGB: 1.9, backend: 'webllm' },
+  'llama-3b':  { id: 'Llama-3.2-3B-Instruct-q4f16_1-MLC', label: 'Llama 3.2 3B',  sizeGB: 1.8, backend: 'webllm' },
+  'qwen-1.5b': { id: 'Qwen2.5-1.5B-Instruct-q4f16_1-MLC', label: 'Qwen 2.5 1.5B', sizeGB: 1.0, backend: 'webllm' },
+  'llama-1b':  { id: 'Llama-3.2-1B-Instruct-q4f16_1-MLC', label: 'Llama 3.2 1B',  sizeGB: 0.8, backend: 'webllm' },
+  // MLX — Apple-silicon only, served via `mlx_lm.server`. WebLLM cannot load
+  // these directly. Setup on the host:
+  //   pip install mlx-lm
+  //   mlx_lm.server --model mlx-community/Apertus-8B-Instruct-2509-8bit --port 8080
+  // Then the browser talks to http://localhost:8080/v1/chat/completions.
+  'apertus-8b-mlx': {
+    id: 'mlx-community/Apertus-8B-Instruct-2509-8bit',
+    label: 'Apertus 8B (MLX)',
+    sizeGB: 8.0,
+    backend: 'mlx',
+    defaultEndpoint: 'http://localhost:8080/v1'
+  }
 };
+const LS_MLX_ENDPOINT = 'eo-local-mlx-endpoint';
 
 // WebLLM only accepts `tools` for a hand-picked set of function-calling
 // checkpoints. Everything else — including all the lightweight Qwen/Llama
@@ -72,6 +85,24 @@ export function currentModelLabel() {
   return _modelKey ? MODELS[_modelKey]?.label : null;
 }
 
+export function currentModelKey() {
+  return _modelKey;
+}
+
+export function currentBackend() {
+  return _modelKey ? MODELS[_modelKey]?.backend : null;
+}
+
+export function getMLXEndpoint() {
+  try {
+    return localStorage.getItem(LS_MLX_ENDPOINT) || MODELS['apertus-8b-mlx'].defaultEndpoint;
+  } catch(e) { return MODELS['apertus-8b-mlx'].defaultEndpoint; }
+}
+
+export function setMLXEndpoint(url) {
+  try { localStorage.setItem(LS_MLX_ENDPOINT, url || ''); } catch(e) {}
+}
+
 export function supportsNativeTools() {
   if (!_modelKey) return false;
   const id = MODELS[_modelKey]?.id;
@@ -101,33 +132,49 @@ export async function hasWebGPU() {
 
 export async function loadModel(key = getPreferredModel()) {
   if (_engine && _modelKey === key) return _engine;
-  if (_loading) return _loading;
+  if (_loading && _modelKey === key) return _loading;
   if (!MODELS[key]) throw new Error(`Unknown model: ${key}`);
-  if (!(await hasWebGPU())) throw new Error('WebGPU not available in this browser.');
 
-  // Persist the user's choice immediately so a refresh mid-download still
-  // auto-resumes on next load. WebLLM caches weights in IndexedDB, so
-  // re-init after refresh pulls from cache rather than re-downloading.
   setPreferredModel(key);
   setOptedIn(true);
 
-  _loading = (async () => {
-    const webllm = await import('https://esm.run/@mlc-ai/web-llm@0.2.79');
-    const modelId = MODELS[key].id;
-    const engine = await webllm.CreateMLCEngine(modelId, {
-      initProgressCallback: (p) => {
-        emitProgress({
-          phase: 'download',
-          text: p.text || '',
-          progress: typeof p.progress === 'number' ? p.progress : 0
-        });
+  const backend = MODELS[key].backend;
+  if (backend === 'mlx') {
+    _loading = (async () => {
+      // Ping the MLX server to verify the user has it running.
+      const endpoint = getMLXEndpoint();
+      emitProgress({ phase: 'download', text: `Connecting to MLX server at ${endpoint}…`, progress: 0.1 });
+      try {
+        const r = await fetch(endpoint.replace(/\/+$/,'') + '/models', { method: 'GET' });
+        if (!r.ok) throw new Error(`MLX server at ${endpoint} returned ${r.status}. Run: pip install mlx-lm && mlx_lm.server --model ${MODELS[key].id} --port 8080`);
+      } catch(e) {
+        throw new Error(`No MLX server reachable at ${endpoint}. Run: pip install mlx-lm && mlx_lm.server --model ${MODELS[key].id} --port 8080 — then reload.`);
       }
-    });
-    _engine = engine;
-    _modelKey = key;
-    emitProgress({ phase: 'ready', text: `${MODELS[key].label} ready`, progress: 1 });
-    return engine;
-  })();
+      _engine = { backend: 'mlx', endpoint, modelId: MODELS[key].id };
+      _modelKey = key;
+      emitProgress({ phase: 'ready', text: `${MODELS[key].label} ready (MLX)`, progress: 1 });
+      return _engine;
+    })();
+  } else {
+    if (!(await hasWebGPU())) throw new Error('WebGPU not available in this browser.');
+    _loading = (async () => {
+      const webllm = await import('https://esm.run/@mlc-ai/web-llm@0.2.79');
+      const modelId = MODELS[key].id;
+      const engine = await webllm.CreateMLCEngine(modelId, {
+        initProgressCallback: (p) => {
+          emitProgress({
+            phase: 'download',
+            text: p.text || '',
+            progress: typeof p.progress === 'number' ? p.progress : 0
+          });
+        }
+      });
+      _engine = engine;
+      _modelKey = key;
+      emitProgress({ phase: 'ready', text: `${MODELS[key].label} ready`, progress: 1 });
+      return engine;
+    })();
+  }
 
   try {
     return await _loading;
@@ -146,6 +193,20 @@ export async function unloadModel() {
   }
   _engine = null;
   _modelKey = null;
+  _demotedFromNative.clear();
+}
+
+/** Swap the active model. Unloads the current engine, then loads the new one. */
+export async function switchModel(newKey) {
+  if (!MODELS[newKey]) throw new Error(`Unknown model: ${newKey}`);
+  if (_modelKey === newKey && _engine) return _engine;
+  if (_loading) {
+    // Wait for the in-flight load to settle before swapping.
+    try { await _loading; } catch(e) { /* ignore */ }
+  }
+  await unloadModel();
+  emitProgress({ phase: 'download', text: `Swapping to ${MODELS[newKey].label}…`, progress: 0 });
+  return loadModel(newKey);
 }
 
 /**
@@ -155,6 +216,32 @@ export async function unloadModel() {
  */
 export async function complete({ messages, tools, tool_choice = 'auto', temperature = 0.3, max_tokens = 512 }) {
   if (!_engine) throw new Error('Local model not loaded.');
+
+  // MLX backend: OpenAI-compatible HTTP against the user's local mlx_lm.server.
+  if (_engine.backend === 'mlx') {
+    const body = {
+      model: _engine.modelId,
+      messages, temperature, max_tokens,
+      stream: false
+    };
+    const url = _engine.endpoint.replace(/\/+$/,'') + '/chat/completions';
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error(`MLX server error ${r.status}: ${await r.text().catch(() => '')}`);
+    const resp = await r.json();
+    const choice = resp.choices?.[0];
+    const msg = choice?.message || {};
+    return {
+      content: msg.content || '',
+      tool_calls: msg.tool_calls || null,
+      finish_reason: choice?.finish_reason || '',
+      usage: resp.usage || {}
+    };
+  }
+
   const req = { messages, temperature, max_tokens };
   const wantsTools = !!(tools && tools.length) && supportsNativeTools();
   if (wantsTools) {
