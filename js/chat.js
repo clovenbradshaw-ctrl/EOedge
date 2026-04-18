@@ -98,14 +98,13 @@ export function initChat({ onTurnComplete } = {}) {
       renderMessages();
     }
   }).catch(err => {
-    _embedStatus = { label: 'Embeddings offline · using heuristic', progress: 1, error: true };
+    _embedStatus = { label: 'Embeddings offline · using heuristic', progress: 1 };
     renderStatusBar();
     if (loadingMsgId != null) {
       const m = _messages.find(x => x.id === loadingMsgId);
       if (m) {
-        m.text = `Semantic model unavailable — falling back to heuristic classification. Chat still works. (${err?.message || err})`;
+        m.text = `Semantic refinement offline — heuristic classification is handling things. (${err?.message || err})`;
         m.loading = false;
-        m.error = true;
       }
       renderMessages();
     }

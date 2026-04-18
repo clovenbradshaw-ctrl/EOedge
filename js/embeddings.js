@@ -13,7 +13,12 @@
 
 const MODEL_ID = 'Xenova/all-MiniLM-L6-v2';
 const TRANSFORMERS_URL = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
-const EXEMPLARS_URL = 'https://raw.githubusercontent.com/clovenbradshaw-ctrl/eo-lexical-analysis/main/data/exemplars.json';
+// Try a vendored copy first so the app works offline / without GitHub raw
+// being reachable, then fall back to the upstream lexical-analysis repo.
+const EXEMPLARS_SOURCES = [
+  { label: 'local',    url: new URL('../data/exemplars.json', import.meta.url).toString() },
+  { label: 'upstream', url: 'https://raw.githubusercontent.com/clovenbradshaw-ctrl/eo-lexical-analysis/main/data/exemplars.json' }
+];
 const TOP_N = 40;
 const MIN_MARGIN = 0.03;
 const CENTROIDS_LS_KEY = 'eo-local-centroids-v1';
@@ -85,6 +90,20 @@ async function embedBatch(texts, onProgress) {
   return out;
 }
 
+async function fetchExemplars() {
+  const errors = [];
+  for (const { label, url } of EXEMPLARS_SOURCES) {
+    try {
+      const r = await fetch(url);
+      if (r.ok) return await r.json();
+      errors.push(`${label} ${r.status}`);
+    } catch(e) {
+      errors.push(`${label} ${e.message || 'network error'}`);
+    }
+  }
+  throw new Error(`exemplars unavailable (${errors.join(', ')})`);
+}
+
 /* ═══ Centroids ═══════════════════════════════════════════════════════ */
 
 function loadCachedCentroids() {
@@ -129,9 +148,7 @@ export async function ensureCentroids(onProgress, { force = false } = {}) {
 
     await loadEmbedder(onProgress);
     onProgress?.('Fetching exemplars…', 0.4);
-    const r = await fetch(EXEMPLARS_URL);
-    if (!r.ok) throw new Error(`exemplars fetch failed: ${r.status}`);
-    const data = await r.json();
+    const data = await fetchExemplars();
     const cells = data['27cell'];
     if (!cells) throw new Error('exemplars.json missing "27cell"');
 
