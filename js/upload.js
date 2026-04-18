@@ -7,6 +7,8 @@
 // ══════════════════════════════════════════════════════════════════════
 
 import { ingest } from './intake.js';
+import { hasApiKey } from './model.js';
+import { hasOptedIn as localOptedIn, isReady as localReady, isLoading as localLoading, loadModel as loadLocalModel } from './local-model.js';
 
 const MAX_BYTES = 8 * 1024 * 1024; // 8 MB safety cap (bumped for PDFs)
 
@@ -125,6 +127,24 @@ async function readAsPDF(file) {
 export async function ingestFile(file, onProgress) {
   onProgress?.({ phase: 'reading', file: file.name });
   const text = await extractText(file);
+  // If no cloud key is configured but the user opted into the on-device model,
+  // make sure it's ready before intake starts — otherwise ambiguous clauses
+  // fall through to the heuristic-only path for the entire document.
+  if (!hasApiKey() && localOptedIn() && !localReady()) {
+    onProgress?.({ phase: 'loading-local', file: file.name });
+    try {
+      if (!localLoading()) await loadLocalModel();
+      else {
+        // Another caller is loading; poll readiness briefly so intake sees it.
+        const start = Date.now();
+        while (!localReady() && Date.now() - start < 60_000) {
+          await new Promise(r => setTimeout(r, 500));
+        }
+      }
+    } catch(e) {
+      // Fall through — intake will degrade to heuristic-only for this file.
+    }
+  }
   onProgress?.({ phase: 'classifying', file: file.name, chars: text.length });
   // The intake pipeline already splits into clauses; we let it run fully
   const results = await ingest(text, { frame: 'default', agent: 'import', source: file.name });

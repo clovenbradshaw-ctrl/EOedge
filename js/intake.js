@@ -22,7 +22,7 @@ import { OPS, EMITTING, siteFor, resolutionFor, siteCode, resolutionCode, opCode
 import { makeAnchor, uuidv7 } from './anchor.js';
 import { appendEvent, upsertAnchor, appendEdge, updateMetrics } from './store.js';
 import { classifyHeuristic } from './heuristic.js';
-import { extractArgs, hasApiKey, ModelError } from './model.js';
+import { extractArgs, extractArgsLocal, isLocalReady, hasApiKey, ModelError } from './model.js';
 
 /* ═══ Clause splitter ════════════════════════════════════════════════
    Pure client-side splitting. No model involvement. Conjunction-based
@@ -84,17 +84,11 @@ export async function classifyClause(clause, options = {}) {
   let rationale = heur.rationale || '';
 
   if (heur.ambiguous || heur.confidence < 0.65) {
-    // Step 2: model fallback
-    if (!hasApiKey()) {
-      // Without a model, fall back to the best heuristic guess if one exists
-      if (heur.ambiguous && heur.top?.[0]?.[1] > 0.3) {
-        const [bestOp] = heur.top[0];
-        final = heuristicToResult(c, heur, bestOp);
-        rationale = `Heuristic-only (no model key); picked ${bestOp} from ambiguous top-${heur.top.length}.`;
-      } else {
-        return { status: 'model_failed', reason: 'no-key-and-no-heuristic-match' };
-      }
-    } else {
+    // Step 2: model fallback ladder — cloud → local → heuristic best-guess.
+    const tryCloud = hasApiKey();
+    const tryLocal = !tryCloud && isLocalReady();
+
+    if (tryCloud) {
       try {
         const r = await extractArgs(c, context);
         tokensIn = r.tokensIn; tokensOut = r.tokensOut;
@@ -120,13 +114,58 @@ export async function classifyClause(clause, options = {}) {
         };
         rationale = r.rationale || `Model extraction (confidence ${(r.confidence||0).toFixed(2)})`;
       } catch(e) {
-        // If the model fails but we have a low-confidence heuristic, use it
+        // If the cloud call fails but the heuristic surfaced a candidate, use it.
         if (heur.operator) {
           final = heuristicToResult(c, heur, heur.operator);
           rationale = `Heuristic fallback after model error: ${e.message || e.code}`;
         } else {
           return { status: 'model_failed', reason: e.message || String(e) };
         }
+      }
+    } else if (tryLocal) {
+      try {
+        const r = await extractArgsLocal(c, heur);
+        tokensIn = r.tokensIn; tokensOut = r.tokensOut;
+        await updateMetrics({ modelCalls: 1, modelTokensIn: tokensIn, modelTokensOut: tokensOut });
+        usedModel = true;
+
+        if (r.nul_gate) {
+          await updateMetrics({ nulGates: 1 });
+          return { status: 'nul_gated', reason: 'local-model-nul' };
+        }
+        final = {
+          operator: r.operator,
+          mode: r.mode,
+          domain: r.domain,
+          object: r.object,
+          spo: r.spo,
+          target: r.target,
+          operand: r.operand,
+          confidence: r.confidence
+        };
+        rationale = r.rationale;
+      } catch(e) {
+        // Local failed — use whatever the heuristic has rather than dropping the clause.
+        const bestOp = heur.operator || heur.top?.[0]?.[0];
+        if (bestOp) {
+          final = heuristicToResult(c, heur, bestOp);
+          rationale = `Heuristic fallback after local-model error: ${e.message || e.code}`;
+        } else {
+          return { status: 'model_failed', reason: e.message || String(e) };
+        }
+      }
+    } else {
+      // No model available — take the best heuristic candidate we have.
+      // The previous logic dropped clauses in a dead zone where heur.operator
+      // was set but heur.top was not (confidence 0.55–0.64, non-ambiguous).
+      const bestOp = heur.operator || (heur.top?.[0]?.[1] > 0.3 ? heur.top[0][0] : null);
+      if (bestOp) {
+        final = heuristicToResult(c, heur, bestOp);
+        rationale = heur.operator
+          ? `Heuristic-only (no model available); low-confidence pick ${bestOp}.`
+          : `Heuristic-only (no model available); picked ${bestOp} from top-${heur.top.length}.`;
+      } else {
+        return { status: 'model_failed', reason: 'no-model-and-no-heuristic-match' };
       }
     }
   } else {
