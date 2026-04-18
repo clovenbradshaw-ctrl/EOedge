@@ -18,7 +18,7 @@ import { OPS, OP_ORDER, SITE_ORDER, RESOLUTION_ORDER, OBJECT_ORDER, DESERT_CELL,
  * Project — the primary query function.
  * Accepts any combination of:
  *   operator:    string ('NUL', 'CON', etc.) or null
- *   object:      'Ground' | 'Figure' | 'Pattern' | null
+ *   object:      'Condition' | 'Entity' | 'Pattern' | null
  *   site:        site name ('Void', 'Entity', ...) or null
  *   resolution:  stance name ('Clearing', 'Binding', ...) or null
  *   target:      anchor hash or null
@@ -118,35 +118,35 @@ export async function resolutionFaceCounts(filter = {}) {
 }
 
 /**
- * Detect DEF conflicts: targets that have multiple DEF events with
- * different operand values, with no subsequent superseding EVA by an
+ * Detect ALT superpositions: targets with multiple ALT events whose
+ * operand values differ, with no subsequent superseding SUP by an
  * agent-level actor.
  */
 export async function findConflicts() {
-  const { events: defs } = await project({ operator: 'DEF', _silent: true, limit: 1e9 });
+  const { events: alts } = await project({ operator: 'ALT', _silent: true, limit: 1e9 });
   // Group by target anchor
   const byTarget = new Map();
-  for (const e of defs) {
+  for (const e of alts) {
     if (!byTarget.has(e.target)) byTarget.set(e.target, []);
     byTarget.get(e.target).push(e);
   }
-  // Also fetch EVAs to find which conflicts have been resolved
-  const { events: evas } = await project({ operator: 'EVA', _silent: true, limit: 1e9 });
+  // Also fetch SUP events to find which superpositions have been resolved
+  const { events: sups } = await project({ operator: 'SUP', _silent: true, limit: 1e9 });
   const resolvedTargets = new Set();
-  for (const e of evas) {
+  for (const e of sups) {
     if (e.agent === 'user' || e.agent === 'rule') resolvedTargets.add(e.target);
   }
 
   const conflicts = [];
-  for (const [target, defEvents] of byTarget.entries()) {
-    if (defEvents.length < 2) continue;
+  for (const [target, altEvents] of byTarget.entries()) {
+    if (altEvents.length < 2) continue;
     // Check if all operand values are the same — if so, no conflict
-    const operands = new Set(defEvents.map(d => JSON.stringify(d.operand)));
+    const operands = new Set(altEvents.map(d => JSON.stringify(d.operand)));
     if (operands.size < 2) continue;
     conflicts.push({
       target,
-      target_form: defEvents[0].target_form,
-      candidates: defEvents.map(d => ({
+      target_form: altEvents[0].target_form,
+      candidates: altEvents.map(d => ({
         value: d.operand,
         source: d.agent,
         timestamp: d.ts,
@@ -165,7 +165,7 @@ export async function findConflicts() {
 export async function summary() {
   const { events } = await project({ _silent: true, limit: 1e9 });
   const opCounts = Object.fromEntries(OP_ORDER.map(op => [op, 0]));
-  const objCounts = { Ground: 0, Figure: 0, Pattern: 0 };
+  const objCounts = { Condition: 0, Entity: 0, Pattern: 0 };
   let latestTs = '';
   for (const e of events) {
     opCounts[e.operator] = (opCounts[e.operator] || 0) + 1;

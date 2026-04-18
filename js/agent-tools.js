@@ -29,7 +29,7 @@ export const TOOL_DEFS = [
           entity:    { type: 'string', description: 'Name of an entity, person, or thing to filter by. Optional.' },
           text:      { type: 'string', description: 'Free-text search across event content. Optional.' },
           time:      { type: 'string', description: 'Time range. One of: today, yesterday, last_week, this_week, last_month, this_month, all. Default all.' },
-          operator:  { type: 'string', description: 'Filter by operator name. One of NUL, SIG, INS, SEG, CON, SYN, DEF, EVA, REC. Optional.' },
+          operator:  { type: 'string', description: 'Filter by operator name. One of NUL, SIG, INS, SEG, CON, SYN, ALT, SUP, REC. Optional.' },
           limit:     { type: 'integer', description: 'Maximum records to return. Default 25, max 200.' }
         }
       }

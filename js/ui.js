@@ -5,7 +5,7 @@
 //   1. Input         — textarea, drop zone (mic planned for v2)
 //   2. Lattice strip — three 3×3 grids (Act, Site, Resolution)
 //   3. Stream        — scrollable list of events, current projection
-//   4. Conflicts     — DEF superpositions needing adjudication
+//   4. Conflicts     — ALT superpositions needing adjudication
 //   5. REC proposals — surfaced pattern detections from fold
 //   6. Compute footer — live counters, GPU=0, Network=0 enforced
 // ══════════════════════════════════════════════════════════════════════
@@ -16,7 +16,7 @@ import { project, findConflicts, summary, actFaceCounts, siteFaceCounts, resolut
 import { ingest } from './intake.js';
 import { getMetrics, storageEstimate, clearAll, resetMetrics, appendEvent, updateMetrics } from './store.js';
 import { loadSeeds } from './seeds.js';
-import { setApiKey, getApiKey, hasApiKey, adjudicateEVA as modelAdjudicate } from './model.js';
+import { setApiKey, getApiKey, hasApiKey, adjudicateSUP as modelAdjudicate } from './model.js';
 import { tryRules, installRule, availableStrategies } from './rules.js';
 import { uuidv7, shortHash, makeAnchor } from './anchor.js';
 
@@ -272,8 +272,7 @@ export async function updateLattice() {
         const res = resolutionFor(m, o);
         const count = resMap[res] || 0;
         const isSelected = state.filter.resolution === res;
-        // Mark Desert cell (SYN × Ground = Seeding × Field but we want to mark at operator level)
-        // In the Resolution face, the cell corresponding to Seeding is valid; desert is in the full 27-cell combo.
+        // Desert (SYN × Condition) lives at the 27-cell combo; resolution face is fine on its own.
         return {
           label: res, sublabel: '',
           count, color: 'var(--violet)', tint: 'var(--violet-pale)',
@@ -426,7 +425,7 @@ function renderConflicts({ onAdjudicate }) {
     <div class="panel-head">
       <div>
         <h2 class="panel-title">Conflicts <span id="conflict-dot"></span></h2>
-        <div class="caption panel-sub" id="conflict-sub">DEF superpositions · model invoked only when no rule applies</div>
+        <div class="caption panel-sub" id="conflict-sub">ALT superpositions · model invoked only when no rule applies</div>
       </div>
     </div>
     <div class="panel-body">
@@ -445,7 +444,7 @@ export async function updateConflicts() {
   dot.innerHTML = open.length ? `<span class="conflict-indicator">${open.length}</span>` : '';
 
   if (!conflicts.length) {
-    list.innerHTML = `<div class="empty quiet">No DEF conflicts in the log.</div>`;
+    list.innerHTML = `<div class="empty quiet">No ALT conflicts in the log.</div>`;
     return;
   }
   list.innerHTML = conflicts.map(renderConflict).join('');
@@ -679,18 +678,18 @@ export const ui = {
       }
     }
     const winner = c.candidates[winnerIdx];
-    const evaEvent = {
+    const supEvent = {
       uuid: uuidv7(),
       ts: new Date().toISOString(),
       op_code: 8,
-      operator: 'EVA',
+      operator: 'SUP',
       target: c.target,
       target_form: c.target_form,
       operand: winner.value,
       spo: { s: agent, p: 'adjudicated', o: String(winner.value) },
       mode: 'Relating',
       domain: 'Significance',
-      object: 'Figure',
+      object: 'Entity',
       site: 8, site_name: 'Lens',
       resolution: 5, resolution_name: 'Binding',
       frame: 'default',
@@ -698,9 +697,9 @@ export const ui = {
       clause: `Adjudication: ${JSON.stringify(winner.value)} selected over alternatives.`,
       confidence: conf,
       rationale: reason,
-      provenance: { source: agent, path: 'eva', winner_event: winner.event_uuid }
+      provenance: { source: agent, path: 'sup', winner_event: winner.event_uuid }
     };
-    await appendEvent(evaEvent);
+    await appendEvent(supEvent);
     await updateMetrics({ conflictsAdjudicated: 1 });
     toast(`Adjudicated via ${agent}: ${String(winner.value).slice(0,40)}`, 'info');
     await ui.refresh?.();
@@ -713,15 +712,15 @@ export const ui = {
     if (!result) return toast('No installed rule matches this target.', 'info');
     const winner = c.candidates[result.winnerIndex];
     await appendEvent({
-      uuid: uuidv7(), ts: new Date().toISOString(), op_code: 8, operator: 'EVA',
+      uuid: uuidv7(), ts: new Date().toISOString(), op_code: 8, operator: 'SUP',
       target: c.target, target_form: c.target_form, operand: winner.value,
       spo: { s: 'rule', p: 'adjudicated', o: String(winner.value) },
-      mode: 'Relating', domain: 'Significance', object: 'Figure',
+      mode: 'Relating', domain: 'Significance', object: 'Entity',
       site: 8, site_name: 'Lens', resolution: 5, resolution_name: 'Binding',
       frame: 'default', agent: 'rule',
       clause: `Rule ${result.ruleStrategy} resolved: ${JSON.stringify(winner.value)}`,
       confidence: 1.0, rationale: result.reason,
-      provenance: { source: 'rule', rule_id: result.ruleId, path: 'eva' }
+      provenance: { source: 'rule', rule_id: result.ruleId, path: 'sup' }
     });
     await updateMetrics({ conflictsAdjudicated: 1 });
     toast(`Resolved by rule: ${result.ruleStrategy}`, 'info');
@@ -745,7 +744,7 @@ export const ui = {
           operand: rule.id,
           spo: { s: 'fold', p: 'installed', o: rule.description },
           mode: 'Generating', domain: 'Significance', object: 'Pattern',
-          site: 9, site_name: 'Paradigm', resolution: 9, resolution_name: 'Weaving',
+          site: 9, site_name: 'Paradigm', resolution: 9, resolution_name: 'Composing',
           frame: 'default', agent: 'user',
           clause: `REC: install rule "${rule.description}"`,
           confidence: 1.0, rationale: p.suggestion,

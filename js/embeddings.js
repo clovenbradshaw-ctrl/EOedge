@@ -30,15 +30,15 @@ const OP_MAP = {
   SEG: { mode: 'Differentiating', domain: 'Structure' },
   CON: { mode: 'Relating',        domain: 'Structure' },
   SYN: { mode: 'Generating',      domain: 'Structure' },
-  DEF: { mode: 'Differentiating', domain: 'Significance' },
-  EVA: { mode: 'Relating',        domain: 'Significance' },
+  ALT: { mode: 'Differentiating', domain: 'Significance' },
+  SUP: { mode: 'Relating',        domain: 'Significance' },
   REC: { mode: 'Generating',      domain: 'Significance' }
 };
 
 const RES_OBJECT = {
-  Clearing: 'Ground', Dissecting: 'Figure', Severing: 'Pattern',
-  Tempering: 'Ground', Binding: 'Figure', Cultivating: 'Pattern',
-  Seeding: 'Ground', Forging: 'Figure', Weaving: 'Pattern'
+  Clearing:    'Condition', Dissecting: 'Entity', Unraveling: 'Pattern',
+  Tending:     'Condition', Binding:    'Entity', Tracing:    'Pattern',
+  Cultivating: 'Condition', Making:     'Entity', Composing:  'Pattern'
 };
 
 let _embedder = null;

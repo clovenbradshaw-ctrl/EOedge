@@ -10,8 +10,8 @@ const SEEDS = [
   {
     clause: "Maria closed James's mental-health referral.",
     spo: { s: "Maria", p: "closed", o: "James's mental-health referral" },
-    operator: "NUL",  // but NUL doesn't emit — we'll convert to EVA(inactive) since an observable transition happened
-    mode: "Relating", domain: "Significance", object: "Figure",
+    operator: "NUL",  // NUL doesn't emit — loadSeeds converts to ALT(inactive) since an observable transition happened
+    mode: "Relating", domain: "Significance", object: "Entity",
     operand: "inactive",
     confidence: 0.84,
     rationale: "Referral status transitions from open to closed — a value move within the case-status frame."
@@ -20,7 +20,7 @@ const SEEDS = [
     clause: "Dr. Chen registered a new patient in the intake system.",
     spo: { s: "Dr. Chen", p: "registered", o: "a new patient" },
     operator: "INS",
-    mode: "Generating", domain: "Existence", object: "Figure",
+    mode: "Generating", domain: "Existence", object: "Entity",
     operand: "new patient record",
     confidence: 0.94,
     rationale: "A specific patient crosses from potential to actual; a new permanent anchor is minted."
@@ -29,16 +29,16 @@ const SEEDS = [
     clause: "The team split the caseload by district.",
     spo: { s: "The team", p: "split", o: "the caseload" },
     operator: "SEG",
-    mode: "Differentiating", domain: "Structure", object: "Ground",
+    mode: "Differentiating", domain: "Structure", object: "Condition",
     operand: "by district",
     confidence: 0.91,
-    rationale: "A collection is partitioned along a dimension; boundaries drawn over existing ground."
+    rationale: "A collection is partitioned along a dimension; boundaries drawn over existing terrain."
   },
   {
     clause: "The housing program linked each client with an assigned caseworker.",
     spo: { s: "The housing program", p: "linked", o: "each client with an assigned caseworker" },
     operator: "CON",
-    mode: "Relating", domain: "Structure", object: "Figure",
+    mode: "Relating", domain: "Structure", object: "Entity",
     operand: "assigned caseworker",
     confidence: 0.93,
     rationale: "A relationship is established between two differentiated entity classes."
@@ -55,31 +55,31 @@ const SEEDS = [
   {
     clause: "The CRM's Q3 revenue is $4.2M.",
     spo: { s: "The CRM", p: "reports", o: "Q3 revenue of $4.2M" },
-    operator: "DEF",
-    mode: "Differentiating", domain: "Significance", object: "Figure",
+    operator: "ALT",
+    mode: "Differentiating", domain: "Significance", object: "Entity",
     operand: "4.2M",
     confidence: 0.88,
     agent: "source:crm",
-    rationale: "A value is established for Q3 revenue under the CRM frame."
+    rationale: "A value is asserted for Q3 revenue under the CRM frame — one alternative among possible values."
   },
   {
     clause: "The finance team's manual count puts Q3 revenue at $3.9M.",
     spo: { s: "The finance team", p: "counts", o: "Q3 revenue at $3.9M" },
-    operator: "DEF",
-    mode: "Differentiating", domain: "Significance", object: "Figure",
+    operator: "SUP",
+    mode: "Relating", domain: "Significance", object: "Entity",
     operand: "3.9M",
     confidence: 0.86,
     agent: "source:manual",
-    rationale: "A competing value is established for the same target under the manual-count frame. Superposition — both held in the log."
+    rationale: "A competing value is held for the same target under the manual-count frame. Superposition — both held simultaneously."
   },
   {
     clause: "The intake form status moved from pending to active.",
     spo: { s: "The intake form status", p: "moved", o: "from pending to active" },
-    operator: "EVA",
-    mode: "Relating", domain: "Significance", object: "Figure",
+    operator: "ALT",
+    mode: "Differentiating", domain: "Significance", object: "Entity",
     operand: "active",
     confidence: 0.88,
-    rationale: "Status transition renders judgment on the case — moving between values within a stable frame."
+    rationale: "Value changes within the case-status frame — alternation between pending and active."
   },
   {
     clause: "The department restructured its client classification from two tiers into five.",
@@ -112,10 +112,10 @@ const SEEDS = [
     clause: "Maria reclassified the case from housing support to crisis intervention.",
     spo: { s: "Maria", p: "reclassified", o: "the case" },
     operator: "REC",
-    mode: "Generating", domain: "Significance", object: "Figure",
+    mode: "Generating", domain: "Significance", object: "Entity",
     operand: "crisis intervention",
     confidence: 0.79,
-    rationale: "The interpretive frame under which the case is held is itself changed — not a status transition but a schema shift for this case."
+    rationale: "The interpretive frame under which the case is held is itself changed — not a value change but a schema shift for this case."
   }
 ];
 
@@ -130,8 +130,8 @@ export async function loadSeeds({ frame = 'default' } = {}) {
 
   for (let i = 0; i < SEEDS.length; i++) {
     const s = SEEDS[i];
-    // Convert the NUL seed into an EVA (since NUL never emits)
-    const op = s.operator === 'NUL' ? 'EVA' : s.operator;
+    // Convert the NUL seed into an ALT (since NUL never emits)
+    const op = s.operator === 'NUL' ? 'ALT' : s.operator;
     const opData = OPS[op];
     if (!opData) continue;
 
@@ -142,7 +142,7 @@ export async function loadSeeds({ frame = 'default' } = {}) {
         hash: anchor.hash,
         form: anchor.form,
         original: anchor.original,
-        type_hint: s.object === 'Ground' ? 'Field' : s.object === 'Pattern' ? 'Paradigm' : 'Entity'
+        type_hint: s.object === 'Condition' ? 'Field' : s.object === 'Pattern' ? 'Paradigm' : 'Entity'
       });
       anchorSeen.add(anchor.hash);
     }

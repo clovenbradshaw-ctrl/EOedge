@@ -4,7 +4,7 @@
 // Per spec §7, the tiny model is asked three bounded questions:
 //   1. Argument extraction    — operator + target + operand from a clause
 //   2. Resolution-face stance — the Mode × Object grain
-//   3. EVA adjudication       — pick among conflicting values
+//   3. SUP adjudication       — pick among superposed values
 //
 // This module defines the interface. The current adapter calls the
 // Anthropic API with structured JSON output. To swap in ONNX Runtime Web
@@ -88,19 +88,19 @@ INS  (Generating × Existence)         · instantiating a concrete thing
 SEG  (Differentiating × Structure)    · partitioning, boundary-drawing
 CON  (Relating × Structure)           · establishing a relationship
 SYN  (Generating × Structure)         · synthesizing an emergent whole
-DEF  (Differentiating × Significance) · defining / setting a value in a frame
-EVA  (Relating × Significance)        · evaluating / resolving between values
-REC  (Generating × Significance)      · restructuring the frame itself
+ALT  (Differentiating × Significance) · changing value within the frame
+SUP  (Relating × Significance)        · holding contradictions simultaneously
+REC  (Generating × Significance)      · changing the frame itself
 
 Q1 · Mode: Differentiating | Relating | Generating
 Q2 · Domain: Existence | Structure | Significance
-Q3 · Object: Ground | Figure | Pattern
-   (Ground = ambient/background; Figure = specific bounded entity; Pattern = recurring regularity)
+Q3 · Object: Condition | Entity | Pattern
+   (Condition = ambient/background; Entity = specific bounded thing; Pattern = recurring regularity)
 
 ${context ? `Context (for reference only, do not classify):\n"${context.replace(/"/g,'\\"')}"\n\n` : ''}Clause: "${clause.replace(/"/g,'\\"')}"
 
 Return JSON only, no code fence, no prose:
-{"operator":"NUL|SIG|INS|SEG|CON|SYN|DEF|EVA|REC","target":"concise noun phrase","operand":"what it becomes or acts with, or empty","spo":{"s":"subject","p":"predicate","o":"object-or-empty"},"mode":"...","domain":"...","object":"Ground|Figure|Pattern","confidence":0.85,"rationale":"one short sentence","nul_gate":false}
+{"operator":"NUL|SIG|INS|SEG|CON|SYN|ALT|SUP|REC","target":"concise noun phrase","operand":"what it becomes or acts with, or empty","spo":{"s":"subject","p":"predicate","o":"object-or-empty"},"mode":"...","domain":"...","object":"Condition|Entity|Pattern","confidence":0.85,"rationale":"one short sentence","nul_gate":false}
 
 If the input is not a transformation claim, set nul_gate=true and leave other fields as empty strings or zeros.`;
 
@@ -133,21 +133,21 @@ export async function extractArgs(clause, context = '') {
 const RESOLUTION_PROMPT = (clause, operator) => `You are an EO Resolution-face classifier.
 
 The Resolution face (Mode × Object) names the stance of engagement:
-  Clearing     (Differentiating × Ground)  · dissolving conditions, opening space
-  Dissecting   (Differentiating × Figure)  · separating a specific entity into parts
-  Severing     (Differentiating × Pattern) · breaking a recurring pattern
-  Tempering    (Relating × Ground)         · shaping ambient conditions
-  Binding      (Relating × Figure)         · holding a specific entity in relation
-  Cultivating  (Relating × Pattern)        · tending to a recurring pattern
-  Seeding      (Generating × Ground)       · generating ambient conditions
-  Forging      (Generating × Figure)       · making a specific entity
-  Weaving      (Generating × Pattern)      · generating a recurring pattern
+  Clearing     (Differentiating × Condition) · dissolving conditions, opening space
+  Dissecting   (Differentiating × Entity)    · separating a specific entity into parts
+  Unraveling   (Differentiating × Pattern)   · loosening a recurring pattern
+  Tending      (Relating × Condition)        · shaping ambient conditions
+  Binding      (Relating × Entity)           · holding a specific entity in relation
+  Tracing      (Relating × Pattern)          · following a recurring pattern
+  Cultivating  (Generating × Condition)      · generating ambient conditions
+  Making       (Generating × Entity)         · producing a specific entity
+  Composing    (Generating × Pattern)        · generating a recurring pattern
 
 Operator: ${operator}
 Clause: "${clause.replace(/"/g,'\\"')}"
 
 Return JSON only:
-{"resolution":"Clearing|Dissecting|Severing|Tempering|Binding|Cultivating|Seeding|Forging|Weaving","confidence":0.85}`;
+{"resolution":"Clearing|Dissecting|Unraveling|Tending|Binding|Tracing|Cultivating|Making|Composing","confidence":0.85}`;
 
 export async function classifyResolution(clause, operator) {
   const { json, tokensIn, tokensOut } = await callModel(RESOLUTION_PROMPT(clause, operator), 100);
@@ -158,9 +158,9 @@ export async function classifyResolution(clause, operator) {
   };
 }
 
-// ─── 7.3 EVA adjudication ──────────────────────────────────────────────
+// ─── 7.3 SUP adjudication ──────────────────────────────────────────────
 
-const ADJUDICATE_PROMPT = (target, values, context) => `You are an EO EVA adjudicator. Choose which of several conflicting values for the same target should be displayed. The other values remain in the log — this is not a delete; it is a projection choice.
+const ADJUDICATE_PROMPT = (target, values, context) => `You are an EO SUP adjudicator. Several ALT values for the same target are held in superposition. Choose which one should be displayed. The others remain in the log — this is not a delete; it is a projection choice.
 
 Target: ${target}
 
@@ -170,7 +170,7 @@ ${values.map((v, i) => `  [${i}] ${JSON.stringify(v.value)} · source: ${v.sourc
 ${context ? `Neighboring context:\n${context}\n\n` : ''}Return JSON only:
 {"winner_index":0,"reason":"short explanation (≤ 20 tokens)","confidence":0.85}`;
 
-export async function adjudicateEVA(target, values, context = '') {
+export async function adjudicateSUP(target, values, context = '') {
   const { json, tokensIn, tokensOut } = await callModel(ADJUDICATE_PROMPT(target, values, context), 120);
   return {
     winnerIndex: typeof json.winner_index === 'number' ? json.winner_index : 0,
@@ -185,7 +185,7 @@ export async function adjudicateEVA(target, values, context = '') {
 /**
  * Free-prose call for SYN operator paths. Input is an already-classified
  * event set plus a directive; output is short natural-language prose.
- * Unlike extractArgs/classifyResolution/adjudicateEVA this doesn't return
+ * Unlike extractArgs/classifyResolution/adjudicateSUP this doesn't return
  * structured JSON — the model is answering in bounded prose because the
  * caller (chat-execute SYN) needs prose.
  *

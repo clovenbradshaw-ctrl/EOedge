@@ -17,7 +17,7 @@ import { ingest } from './intake.js';
 import { findConflicts } from './horizon.js';
 import { tryRules } from './rules.js';
 import { OPS, opCodeOf, siteFor, resolutionFor, siteCode, resolutionCode } from './ops.js';
-import { adjudicateEVA, hasApiKey, extractArgs, summarize } from './model.js';
+import { adjudicateSUP, hasApiKey, extractArgs, summarize } from './model.js';
 
 const TREE_DEPTH_LIMIT = 8;
 
@@ -32,8 +32,8 @@ export async function execute(tree, { depth = 0, budget = { events_scanned: 0, t
     case 'SEG': return execSEG(tree, budget, depth);
     case 'CON': return execCON(tree, budget, depth);
     case 'SYN': return execSYN(tree, budget, depth);
-    case 'DEF': return execDEF(tree, budget, depth);
-    case 'EVA': return execEVA(tree, budget, depth);
+    case 'ALT': return execALT(tree, budget, depth);
+    case 'SUP': return execSUP(tree, budget, depth);
     case 'REC': return execREC(tree, budget, depth);
     default:    return { ok: false, op: tree.op, nul: { reason: 'unknown_op' }, cost: budget };
   }
@@ -243,55 +243,55 @@ function synthesizeTemplate(events, tree) {
   return `${events.length} events ${timeRange}: ${parts.join(' · ')}. Dominant activity: ${Object.entries(byOp).sort(([,a],[,b]) => b-a)[0]?.[0] || '—'}.`;
 }
 
-/* ═══ DEF — install a frame definition ══════════════════════════════════
-   DEF(anchor:X, text:"meaning") → logs a DEF event establishing the frame
+/* ═══ ALT — assert a value within the frame ═══════════════════════════
+   ALT(anchor:X, text:"value") → logs an ALT event stating a value for X
    ═══════════════════════════════════════════════════════════════════ */
 
-async function execDEF(tree, budget, depth) {
+async function execALT(tree, budget, depth) {
   const term = tree.operand;
   const meaning = tree.context;
   if (!term || term.kind !== 'anchor') {
-    return { ok: true, op: 'DEF', nul: { reason: 'def_requires_term' }, cost: budget };
+    return { ok: true, op: 'ALT', nul: { reason: 'alt_requires_term' }, cost: budget };
   }
   const a = makeAnchor(term.name);
-  await upsertAnchor({ hash: a.hash, form: a.form, original: a.original, type_hint: 'Definition' });
-  const mode = 'Differentiating', domain = 'Significance', object = 'Figure';
+  await upsertAnchor({ hash: a.hash, form: a.form, original: a.original, type_hint: 'Entity' });
+  const mode = 'Differentiating', domain = 'Significance', object = 'Entity';
   const site = siteFor(domain, object);
   const res = resolutionFor(mode, object);
   const event = {
     uuid: uuidv7(),
     ts: new Date().toISOString(),
     op_code: 7,
-    operator: 'DEF',
+    operator: 'ALT',
     target: a.hash,
     target_form: a.form,
     operand: meaning?.value || null,
-    spo: { s: 'user', p: 'defines', o: meaning?.value || '' },
+    spo: { s: 'user', p: 'asserts', o: meaning?.value || '' },
     mode, domain, object,
     site: siteCode(site), site_name: site,
     resolution: resolutionCode(res), resolution_name: res,
     frame: 'default', agent: 'user',
-    clause: `DEF: ${term.name} means "${meaning?.value || ''}"`,
+    clause: `ALT: ${term.name} = "${meaning?.value || ''}"`,
     confidence: 1.0,
-    rationale: 'User-supplied definition from chat',
-    provenance: { source: 'chat', path: 'def' }
+    rationale: 'User-asserted value from chat',
+    provenance: { source: 'chat', path: 'alt' }
   };
   await appendEvent(event);
   return {
     ok: true,
-    op: 'DEF',
+    op: 'ALT',
     events: [event],
-    notes: `Defined "${term.name}"`,
+    notes: `Asserted "${term.name}"`,
     cost: budget
   };
 }
 
-/* ═══ EVA — judgment / adjudication ════════════════════════════════════
-   EVA over a SEG-inner: narrow down to conflicts in that scope
-   EVA with conflict marker: find conflicts relevant to the scope
+/* ═══ SUP — hold/reconcile contradictions ══════════════════════════════
+   SUP over a SEG-inner: narrow down to superposed values in that scope
+   SUP with no inner: find all open superpositions
    ═══════════════════════════════════════════════════════════════════ */
 
-async function execEVA(tree, budget, depth) {
+async function execSUP(tree, budget, depth) {
   // Execute inner to get candidate events (or, if inner is null, use full conflict scan)
   let scopeEvents = [];
   if (tree.operand) {
@@ -309,10 +309,10 @@ async function execEVA(tree, budget, depth) {
   if (!relevant.length) {
     return {
       ok: true,
-      op: 'EVA',
+      op: 'SUP',
       nul: { reason: 'no_conflicts_in_scope' },
       cost: budget,
-      notes: 'No open DEF superpositions in scope.'
+      notes: 'No open ALT superpositions in scope.'
     };
   }
 
@@ -321,18 +321,18 @@ async function execEVA(tree, budget, depth) {
   for (const c of relevant) {
     const ruleResult = await tryRules({ hash: c.target, form: c.target_form }, c.candidates);
     if (ruleResult) {
-      // Rule matched — write the EVA event now so the conflict is actually closed
+      // Rule matched — write the SUP event now so the conflict is actually closed
       const winner = c.candidates[ruleResult.winnerIndex];
       await appendEvent({
         uuid: uuidv7(),
         ts: new Date().toISOString(),
         op_code: 8,
-        operator: 'EVA',
+        operator: 'SUP',
         target: c.target,
         target_form: c.target_form,
         operand: winner.value,
         spo: { s: 'rule', p: 'adjudicated', o: String(winner.value) },
-        mode: 'Relating', domain: 'Significance', object: 'Figure',
+        mode: 'Relating', domain: 'Significance', object: 'Entity',
         site: 8, site_name: 'Lens',
         resolution: 5, resolution_name: 'Binding',
         frame: 'default',
@@ -340,7 +340,7 @@ async function execEVA(tree, budget, depth) {
         clause: `Rule ${ruleResult.ruleStrategy} resolved: ${JSON.stringify(winner.value)}`,
         confidence: ruleResult.confidence || 1.0,
         rationale: ruleResult.reason,
-        provenance: { source: 'rule', rule_id: ruleResult.ruleId, path: 'eva' }
+        provenance: { source: 'rule', rule_id: ruleResult.ruleId, path: 'sup' }
       });
       await updateMetrics({ conflictsAdjudicated: 1 });
     }
@@ -354,7 +354,7 @@ async function execEVA(tree, budget, depth) {
   }
   return {
     ok: true,
-    op: 'EVA',
+    op: 'SUP',
     adjudications,
     notes: `${relevant.length} conflict${relevant.length===1?'':'s'} in scope · ${adjudications.filter(a => a.resolution).length} resolvable by rule`,
     cost: budget

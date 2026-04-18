@@ -48,24 +48,28 @@ const VERB_FAMILIES = {
     patterns: [/\b(merged|combined|integrated|consolidated|unified|fused)\s+(?:\w+\s+){0,5}into\s+\w+/i],
     weight: 1.0
   },
-  DEF: {
-    verbs: ['defined', 'defines', 'define', 'set', 'sets', 'specified', 'specifies', 'declared', 'declares',
-            'established that', 'assigned the value', 'stated', 'states',
-            'holds', 'asserted', 'asserts'],
-    // "X is Y" patterns
-    patterns: [/\b(?:is|are|was|were)\s+(?:defined as|declared|set to|equal to)\b/i,
-               /\b(?:disagree|conflict|differ|contradict)\s+(?:on|about)\b/i], // DEF superposition
-    weight: 0.9
-  },
-  EVA: {
+  ALT: {
     verbs: ['moved', 'moves', 'changed', 'changes', 'updated', 'updates', 'update',
             'transitioned', 'transitions', 'shifted', 'shifts', 'altered', 'alters',
             'revised', 'revises', 'switched', 'switches', 'adjusted', 'adjusts',
             'modified', 'modifies', 'upgraded', 'downgraded', 'promoted', 'demoted',
-            'became', 'becomes'],
-    patterns: [/\bfrom\s+\w+(?:\s+\w+)?\s+to\s+\w+/i, // "from X to Y" status transition
-               /\b(restated|revalued|adjusted)\b/i],
+            'became', 'becomes',
+            'defined', 'defines', 'define', 'set', 'sets', 'specified', 'specifies', 'declared', 'declares',
+            'stated', 'states', 'holds', 'asserted', 'asserts'],
+    patterns: [/\bfrom\s+\w+(?:\s+\w+)?\s+to\s+\w+/i, // "from X to Y" value transition
+               /\b(restated|revalued|adjusted)\b/i,
+               /\b(?:is|are|was|were)\s+(?:defined as|declared|set to|equal to)\b/i],
     weight: 1.0
+  },
+  SUP: {
+    verbs: ['weighed', 'weighs', 'reconciled', 'reconciles', 'balanced', 'balances',
+            'contrasted', 'contrasts', 'juxtaposed', 'juxtaposes', 'superposed', 'superposes',
+            'held', 'holds'],
+    // Contradictions held simultaneously ("disagree on", "both X and Y")
+    patterns: [/\b(?:disagree|conflict|differ|contradict)\s+(?:on|about)\b/i,
+               /\bboth\s+\w+\s+and\s+\w+\b/i,
+               /\b(?:tension|trade[- ]off|competing)\s+(?:between|with)\b/i],
+    weight: 0.9
   },
   REC: {
     verbs: ['restructured', 'restructures', 'reframed', 'reframes', 'reorganized', 'reorganizes',
@@ -93,8 +97,8 @@ const VERB_FAMILIES = {
   }
 };
 
-/** Ground hints — language suggesting ambient/background rather than a specific entity. */
-const GROUND_MARKERS = [
+/** Condition hints — language suggesting ambient/background rather than a specific entity. */
+const CONDITION_MARKERS = [
   /\b(?:atmosphere|climate|mood|weather|rainfall|drought|temperature|humidity|lighting)\b/i,
   /\b(?:ambient|background|substrate|field|terrain|landscape|environment|surroundings)\b/i,
   /\bacross\s+(?:the\s+)?(?:region|area|territory|basin|whole)\b/i,
@@ -110,8 +114,8 @@ const PATTERN_MARKERS = [
   /\b(?:class|category|kind|type)\s+of\b/i
 ];
 
-/** Figure hints — specific bounded entity (the default, but marked for confidence). */
-const FIGURE_MARKERS = [
+/** Entity hints — specific bounded entity (the default, but marked for confidence). */
+const ENTITY_MARKERS = [
   /\b(?:Mr|Mrs|Ms|Dr|Prof)\.\s+\w+/,
   /\b[A-Z]\w+\s+[A-Z]\w+/, // Proper Noun Proper Noun — likely a named person/org
   /\b(?:the|this|that|a|an)\s+(?:new\s+)?(?:\w+'s\s+)?\w+\b/
@@ -159,13 +163,13 @@ function scoreOperator(clause, tokens, op) {
 }
 
 function scoreObject(clause) {
-  let ground = 0, figure = 0, pattern = 0;
-  for (const r of GROUND_MARKERS) if (r.test(clause)) ground += 1;
+  let condition = 0, entity = 0, pattern = 0;
+  for (const r of CONDITION_MARKERS) if (r.test(clause)) condition += 1;
   for (const r of PATTERN_MARKERS) if (r.test(clause)) pattern += 1;
-  for (const r of FIGURE_MARKERS) if (r.test(clause)) figure += 0.6;
-  // Default weighting: figure unless ground or pattern dominate
-  if (ground === 0 && pattern === 0) figure = Math.max(figure, 0.5);
-  return { Ground: ground, Figure: figure, Pattern: pattern };
+  for (const r of ENTITY_MARKERS) if (r.test(clause)) entity += 0.6;
+  // Default weighting: entity unless condition or pattern dominate
+  if (condition === 0 && pattern === 0) entity = Math.max(entity, 0.5);
+  return { Condition: condition, Entity: entity, Pattern: pattern };
 }
 
 /** Heuristic SPO extraction. Returns best-effort S, P, O from a clause. */
@@ -262,7 +266,7 @@ export function classifyHeuristic(clause) {
   const objScores = scoreObject(c);
   const objRanked = Object.entries(objScores).sort(([,a],[,b]) => b-a);
   const [bestObj, bestObjScore] = objRanked[0];
-  const object = bestObjScore > 0 ? bestObj : 'Figure';
+  const object = bestObjScore > 0 ? bestObj : 'Entity';
 
   const spo = extractSPO(c);
 
@@ -271,10 +275,10 @@ export function classifyHeuristic(clause) {
   // Derive mode and domain from operator
   const OP_MODE = { NUL:'Differentiating', SIG:'Relating', INS:'Generating',
                     SEG:'Differentiating', CON:'Relating', SYN:'Generating',
-                    DEF:'Differentiating', EVA:'Relating', REC:'Generating' };
+                    ALT:'Differentiating', SUP:'Relating', REC:'Generating' };
   const OP_DOMAIN = { NUL:'Existence', SIG:'Existence', INS:'Existence',
                       SEG:'Structure', CON:'Structure', SYN:'Structure',
-                      DEF:'Significance', EVA:'Significance', REC:'Significance' };
+                      ALT:'Significance', SUP:'Significance', REC:'Significance' };
 
   return {
     operator: bestOp,
