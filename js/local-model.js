@@ -24,7 +24,10 @@ const NATIVE_TOOL_MODEL_IDS = new Set([
   'Hermes-3-Llama-3.1-8B-q4f32_1-MLC',
   'Hermes-3-Llama-3.1-8B-q4f16_1-MLC'
 ]);
-const DEFAULT_KEY = 'qwen-3b';
+// EO does the heavy lifting (heuristic + centroid + rule pipeline), so the
+// local model only sees hard residual cases (SYN synthesis, low-confidence
+// intake). Default to the smallest competent quant — ~1 GB instead of ~1.9 GB.
+const DEFAULT_KEY = 'qwen-1.5b';
 const LS_PREF_KEY = 'eo-local-model-pref';
 const LS_OPTED_IN = 'eo-local-model-opted-in';
 
@@ -162,14 +165,23 @@ export async function complete({ messages, tools, tool_choice = 'auto', temperat
   try {
     resp = await _engine.chat.completions.create(req);
   } catch(e) {
+    const msg = e?.message || String(e);
     // Safety net: if the selected model rejects the tools field, demote it
     // for the rest of the session and retry without tools.
-    const msg = e?.message || String(e);
     if (req.tools && /not supported for ChatCompletionRequest\.tools/i.test(msg)) {
       const id = MODELS[_modelKey]?.id;
       if (id) _demotedFromNative.add(id);
       delete req.tools;
       delete req.tool_choice;
+      resp = await _engine.chat.completions.create(req);
+    } else if (/module has already been disposed|already (?:been )?(?:disposed|terminated)|context (?:is )?lost/i.test(msg)) {
+      // WebGPU context lost or engine disposed (tab backgrounding, GPU
+      // driver reset, OOM). Drop the dead handle and reload transparently.
+      const key = _modelKey;
+      _engine = null;
+      _modelKey = null;
+      emitProgress({ phase: 'download', text: 'Reloading on-device AI after GPU context loss…', progress: 0 });
+      await loadModel(key);
       resp = await _engine.chat.completions.create(req);
     } else {
       throw e;

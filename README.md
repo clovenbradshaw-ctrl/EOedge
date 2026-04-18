@@ -116,7 +116,7 @@ eo-local/
 
 ## Known limits
 
-- Document upload handles plain text, markdown, CSV, and JSON. PDF support would be ~40 lines with pdf.js but isn't in v1.
+- Document upload handles plain text, markdown, CSV, JSON, and PDF (lazy-loaded pdf.js). DOCX would plug in identically via mammoth.
 - The main-thread buffer holds the packed events (~32 MB per million). Past ~10M events the snapshot-checkpoint pattern from EODB becomes necessary; the storage worker has room in the file header to add it.
 - The fold scheduler runs on the main thread with `setTimeout`. A real Web Worker is v2.
 - First run downloads the embedding model (~24 MB) and bakes centroids (~30–60 seconds). Subsequent runs use the cached centroids instantly. For production this should be pre-baked and committed so users get instant load.
