@@ -45,6 +45,7 @@
 /* ─── RESET & BASE ─── */
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
+html { height: 100%; }
 body {
   background: var(--paper);
   color: var(--ink);
@@ -52,7 +53,15 @@ body {
   font-size: 17px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
+  /* Flex column fills the dynamic viewport so header/main/footer size
+     themselves correctly on mobile regardless of URL-bar collapse or
+     safe-area insets. 100vh is the fallback for older engines. */
   min-height: 100vh;
+  min-height: 100dvh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 input, textarea, button, select { font-family: inherit; font-size: inherit; color: inherit; }
 button { cursor: pointer; }
@@ -73,14 +82,13 @@ button { cursor: pointer; }
 
 /* ─── LAYOUT (chat-primary) ─── */
 .app-header {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 12px 18px;
   background: var(--paper-light);
   border-bottom: 1px solid var(--paper-shadow);
-  position: sticky;
-  top: 0;
   z-index: 30;
 }
 .app-header .brand-name {
@@ -117,11 +125,8 @@ button { cursor: pointer; }
 .btn-icon:hover { background: var(--paper-warm); color: var(--ink); }
 
 .app-main {
-  position: fixed;
-  top: 61px;     /* header height */
-  left: 0;
-  right: 0;
-  bottom: 40px;  /* footer height */
+  flex: 1 1 auto;
+  min-height: 0;  /* allow inner flex child to shrink and scroll */
   overflow: hidden;
 }
 .chat-surface {
@@ -664,6 +669,7 @@ button { cursor: pointer; }
   top: 0;
   right: 0;
   height: 100vh;
+  height: 100dvh;
   width: min(560px, 95vw);
   background: var(--paper);
   border-left: 1px solid var(--paper-shadow);
@@ -1273,13 +1279,10 @@ button { cursor: pointer; }
 
 /* ─── FOOTER ─── */
 .compute-footer {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  flex: 0 0 auto;
   background: var(--paper-light);
   border-top: 1px solid var(--paper-shadow);
-  padding: 10px 16px;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
   z-index: 40;
 }
 .footer-inner {
