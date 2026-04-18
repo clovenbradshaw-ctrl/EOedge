@@ -11,7 +11,7 @@ import { execute } from './chat-execute.js';
 import { render } from './chat-render.js';
 import { ingestFile, attachDropZone } from './upload.js';
 import { ensureCentroids, isReady as embedReady, isLoading as embedLoading } from './embeddings.js';
-import { getMetrics, appendEvent, updateMetrics } from './store.js';
+import { getMetrics, appendEvent, updateMetrics, countEvents, clearAll } from './store.js';
 import { uuidv7 } from './anchor.js';
 import {
   loadModel, isReady as localReady, isLoading as localLoading,
@@ -54,16 +54,39 @@ export function initChat({ onTurnComplete } = {}) {
     }
   });
 
-  // Auto-resume the model if the user opted in last session.
-  if (hasOptedIn()) {
-    hasWebGPU().then((ok) => {
-      if (ok) startLocalLoad();
-    });
-  }
+  // Surface preserved log size. The OPFS-backed store restores every prior
+  // event at openDB(), so the log persists across sessions by default.
+  countEvents({}).then((n) => {
+    if (n > 0) {
+      pushSystemMessage(`${n.toLocaleString()} event${n === 1 ? '' : 's'} preserved from previous sessions. Use "Clear log" below the composer or the Inspector to wipe.`);
+    }
+  }).catch(() => {});
 
-  // Kick off embedding load in background (best-effort — system works without it).
-  // Cold loads download ~24 MB of model weights on first run, so be explicit
-  // about what's happening instead of hiding it in a 10px status strip.
+  // Defer the heavy boot work until the browser is idle. First paint and the
+  // heuristic/structural path don't need either of these ready — the embedder
+  // is only consulted when it's already loaded (chat-compile passes
+  // useEmbeddings: embedReady()), and the local model is only consulted on
+  // the agent path. Pulling them out of the critical path shaves ~24 MB of
+  // MiniLM weights and up to ~1–2 GB of WebLLM shards from first paint.
+  whenIdle(() => {
+    kickEmbeddingsLoad();
+    if (hasOptedIn()) {
+      hasWebGPU().then((ok) => {
+        if (ok) startLocalLoad();
+      });
+    }
+  });
+}
+
+function whenIdle(fn) {
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(fn, { timeout: 2000 });
+  } else {
+    setTimeout(fn, 500);
+  }
+}
+
+function kickEmbeddingsLoad() {
   const willBeCold = !hasCachedCentroids();
   let loadingMsgId = null;
   if (willBeCold) {
@@ -271,6 +294,7 @@ function renderShell() {
         </div>
         <div class="chat-hints">
           <span class="hint">⌘↵ to send · drop files here · Esc to unfocus</span>
+          <button type="button" class="hint-link" id="chat-clear-log" title="Delete all events, anchors, edges, frames, rules, and metrics from OPFS">Clear log</button>
         </div>
       </div>
     </div>`;
@@ -300,6 +324,17 @@ function renderShell() {
     fileInput.value = '';
   });
   attachDropZone(dropzone, handleFiles);
+
+  document.getElementById('chat-clear-log')?.addEventListener('click', async () => {
+    if (!confirm('Delete the entire on-device log — every event, anchor, edge, frame, rule, and metric? This cannot be undone.')) return;
+    try {
+      await clearAll();
+      pushSystemMessage('Log cleared. OPFS database reset.');
+      _onTurnComplete?.();
+    } catch(e) {
+      pushSystemMessage(`Clear failed: ${e.message || e}`, { error: true });
+    }
+  });
 }
 
 function sendClicked() {
