@@ -33,20 +33,63 @@ function newMessage(role, text, extras = {}) {
 export function initChat({ onTurnComplete } = {}) {
   _onTurnComplete = onTurnComplete;
   renderShell();
+  pushSystemGreeting();
   renderMessages();
 
-  // Kick off embedding load in background (best-effort — system works without it)
+  // Kick off embedding load in background (best-effort — system works without it).
+  // Cold loads download ~24 MB of model weights on first run, so be explicit
+  // about what's happening instead of hiding it in a 10px status strip.
+  const willBeCold = !hasCachedCentroids();
+  let loadingMsgId = null;
+  if (willBeCold) {
+    loadingMsgId = newMessage('system',
+      `Loading semantic model (MiniLM · ~24 MB, first run only). Cached locally after this. You can still chat — heuristic classification handles the meantime.`,
+      { loading: true }
+    ).id;
+    renderMessages();
+  }
+
+  const startedAt = Date.now();
   ensureCentroids((label, progress) => {
     _embedStatus = { label, progress };
     renderStatusBar();
+    if (loadingMsgId != null) {
+      const m = _messages.find(x => x.id === loadingMsgId);
+      if (m) {
+        const pct = Math.round((progress || 0) * 100);
+        m.text = `Loading semantic model · ${label} · ${pct}%`;
+        renderMessages();
+      }
+    }
     if (progress >= 1) setTimeout(() => { _embedStatus = null; renderStatusBar(); }, 1500);
+  }).then(() => {
+    if (loadingMsgId != null) {
+      const m = _messages.find(x => x.id === loadingMsgId);
+      if (m) {
+        const secs = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+        m.text = `Semantic model ready (${secs}s). Subsequent loads will be instant.`;
+        m.loading = false;
+      }
+      renderMessages();
+    }
   }).catch(err => {
     _embedStatus = { label: 'Embeddings offline · using heuristic', progress: 1, error: true };
     renderStatusBar();
+    if (loadingMsgId != null) {
+      const m = _messages.find(x => x.id === loadingMsgId);
+      if (m) {
+        m.text = `Semantic model unavailable — falling back to heuristic classification. Chat still works. (${err?.message || err})`;
+        m.loading = false;
+        m.error = true;
+      }
+      renderMessages();
+    }
     setTimeout(() => { _embedStatus = null; renderStatusBar(); }, 4000);
   });
+}
 
-  pushSystemGreeting();
+function hasCachedCentroids() {
+  try { return !!localStorage.getItem('eo-local-centroids-v1'); } catch(e) { return false; }
 }
 
 /** Programmatic message push — used by fold proposals, REC surfaces, etc. */
@@ -215,10 +258,11 @@ function renderMessage(msg) {
   const roleClass = msg.role === 'user' ? 'msg-user' : msg.role === 'system' ? 'msg-sys' : 'msg-asst';
   const errorClass = msg.error ? ' msg-err' : '';
   const nulClass = msg.nul ? ' msg-nul' : '';
+  const loadingClass = msg.loading ? ' msg-loading' : '';
   const receiptHTML = msg.receipt ? renderReceipt(msg) : '';
   const adjHTML = msg.adjudications ? renderAdjudications(msg) : '';
   const body = escapeHTML(msg.text).replace(/\n/g, '<br>');
-  return `<div class="msg ${roleClass}${errorClass}${nulClass}" data-msg-id="${msg.id}">
+  return `<div class="msg ${roleClass}${errorClass}${nulClass}${loadingClass}" data-msg-id="${msg.id}">
     <div class="msg-body">${body}</div>
     ${adjHTML}
     ${receiptHTML}

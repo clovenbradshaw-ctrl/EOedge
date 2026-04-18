@@ -32,7 +32,13 @@
   </header>
 
   <main class="app-main">
-    <section id="chat-section" class="chat-surface"></section>
+    <section id="chat-section" class="chat-surface">
+      <div id="boot-splash" class="boot-splash" role="status" aria-live="polite">
+        <div class="boot-ring"></div>
+        <div class="boot-title">Preparing chat…</div>
+        <div class="boot-sub" id="boot-sub">Opening on-device storage</div>
+      </div>
+    </section>
   </main>
 
   <aside id="inspector" class="inspector" aria-hidden="true">

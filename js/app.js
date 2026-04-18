@@ -22,8 +22,11 @@ function refresh() {
 }
 
 async function main() {
+  const bootSub = document.getElementById('boot-sub');
   try {
+    if (bootSub) bootSub.textContent = 'Opening on-device storage…';
     await openDB();
+    if (bootSub) bootSub.textContent = 'Storage ready · mounting chat';
   } catch(e) {
     document.body.innerHTML = `<div style="padding:40px;font-family:serif;max-width:640px;margin:40px auto;line-height:1.6;">
       <h1 style="color:#B84A62;">Storage unavailable</h1>
@@ -33,7 +36,7 @@ async function main() {
     return;
   }
 
-  // Chat first — the primary surface
+  // Chat first — the primary surface (clears the boot splash by replacing chat-section contents)
   initChat({ onTurnComplete: refresh });
 
   // Inspector (formerly the whole app). Still renders the six panels.
