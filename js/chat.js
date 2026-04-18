@@ -14,11 +14,14 @@ import { ensureCentroids, isReady as embedReady, isLoading as embedLoading } fro
 import { getMetrics, appendEvent, updateMetrics, countEvents, clearAll } from './store.js';
 import { uuidv7 } from './anchor.js';
 import {
-  loadModel, isReady as localReady, isLoading as localLoading,
+  loadModel, switchModel, isReady as localReady, isLoading as localLoading,
   hasOptedIn, hasWebGPU, listModels, getPreferredModel, setPreferredModel,
-  currentModelLabel, onProgress as onLocalProgress
+  currentModelLabel, currentModelKey, complete as localComplete,
+  onProgress as onLocalProgress
 } from './local-model.js';
 import { runTurn as agentRunTurn } from './agent.js';
+import { getMode, setMode, onModeChange, isLLMOnly } from './run-mode.js';
+import { focusDoc } from './upload-panel.js';
 
 /* ═══ State ═══════════════════════════════════════════════════════════ */
 
@@ -42,6 +45,11 @@ export function initChat({ onTurnComplete } = {}) {
   renderShell();
   pushSystemGreeting();
   pushLocalModelBanner();
+  renderModeBanner();
+  onModeChange(() => {
+    renderModeBanner();
+    renderMessages();
+  });
   renderMessages();
 
   onLocalProgress((p) => {
@@ -165,6 +173,9 @@ async function respondTo(userText) {
   _busy = true;
   setComposerBusy(true);
   try {
+    if (isLLMOnly()) {
+      return await respondViaLLMOnly(userText);
+    }
     if (localReady()) {
       return await respondViaAgent(userText);
     }
@@ -176,6 +187,50 @@ async function respondTo(userText) {
     _busy = false;
     setComposerBusy(false);
   }
+}
+
+/** LLM-only mode: no compile/execute, no tools, no log lookups. Just cue the model. */
+async function respondViaLLMOnly(userText) {
+  if (!localReady()) {
+    return newMessage('assistant',
+      `LLM-only mode is on but no on-device model is loaded. Enable the on-device model below, or switch the mode toggle back to EO-pipeline.`,
+      { error: true });
+  }
+  const history = _messages
+    .filter(m => m.role === 'user' || (m.role === 'assistant' && !m.error))
+    .slice(-12)
+    .map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.text || '' }));
+  if (history.length && history[history.length-1].content === userText) history.pop();
+
+  // Prepend any uploaded documents from this session as context. In LLM-only
+  // mode we bypass the helix, so the text itself is what the model sees.
+  const contextBlocks = _llmContextBlocks();
+  const system = `You are running in LLM-only mode. No operator stack, no log retrieval, no tools. Answer from your own knowledge and the pasted document context below (if any). Be concise.`;
+  const messages = [
+    { role: 'system', content: system },
+    ...(contextBlocks.length ? [{ role: 'system', content: `Document context:\n\n${contextBlocks.join('\n\n---\n\n')}` }] : []),
+    ...history,
+    { role: 'user', content: userText }
+  ];
+
+  try {
+    const r = await localComplete({ messages, temperature: 0.3, max_tokens: 512 });
+    return newMessage('assistant', r.content || '(empty response)', {
+      via: 'llm-only',
+      usage: r.usage || null
+    });
+  } catch(e) {
+    return newMessage('assistant', `LLM-only call failed: ${e.message || e}`, { error: true });
+  }
+}
+
+function _llmContextBlocks() {
+  // Messages with a `file_ingest.text` (from the LLM-only upload path)
+  // contain raw document text suitable for direct context.
+  return _messages
+    .filter(m => m.file_ingest?.text && m.file_ingest?.mode === 'llm-only')
+    .slice(-3)
+    .map(m => `### ${m.file_ingest.file}\n\n${m.file_ingest.text.slice(0, 12000)}`);
 }
 
 async function respondViaAgent(userText) {
@@ -250,19 +305,27 @@ function humanTime(iso) {
 
 async function handleFiles(files) {
   for (const file of files) {
-    const startId = newMessage('system', `📎 Uploading ${file.name}…`).id;
+    const doc_id = uuidv7();
+    const mode = getMode();
+    const startId = newMessage('system', `📎 Uploading ${file.name}… [${mode}]`, { doc_id, mode }).id;
     try {
       const result = await ingestFile(file, (p) => {
         const m = _messages.find(x => x.id === startId);
         if (!m) return;
         if (p.phase === 'reading')       m.text = `📎 Reading ${p.file}…`;
         else if (p.phase === 'loading-local') m.text = `📎 ${p.file} · loading on-device classifier…`;
-        else if (p.phase === 'classifying') m.text = `📎 Classifying ${p.file} · ${p.chars} chars`;
-        else if (p.phase === 'done')     m.text = `📎 ${p.file} · ${p.emitted} events logged · ${p.nul_gated} gated${p.failed?` · ${p.failed} failed`:''}`;
+        else if (p.phase === 'classifying') m.text = `📎 Running helix pipeline on ${p.file} · ${p.chars} chars`;
+        else if (p.phase === 'done') {
+          if (p.mode === 'llm-only') {
+            m.text = `📎 ${p.file} · ${p.chars} chars extracted · LLM-only (helix bypassed)`;
+          } else {
+            m.text = `📎 ${p.file} · ${p.emitted} events · ${p.nul_gated} NUL-gated · ${p.failed} failed · see Uploads tab`;
+          }
+        }
         renderMessages();
-      });
-      // Add a small summary turn
-      newMessage('assistant', summarizeIngest(result), { file_ingest: result });
+      }, { doc_id });
+      // Link the summary to the Uploads panel
+      newMessage('assistant', summarizeIngest(result), { file_ingest: result, doc_id });
     } catch(e) {
       newMessage('system', `📎 ${file.name} failed: ${e.message}`, { error: true });
     }
@@ -273,7 +336,16 @@ async function handleFiles(files) {
 }
 
 function summarizeIngest(r) {
-  return `Ingested "${r.file}" — ${r.emitted} events added. Ask me about it.`;
+  if (r.mode === 'llm-only') {
+    return `Extracted "${r.file}" (${r.chars} chars). No stages run — LLM-only mode. Ask me and I'll use the document as context.`;
+  }
+  if (r.emitted === 0 && r.clauses > 0) {
+    const reasons = [];
+    if (r.failed) reasons.push(`${r.failed} failed (no classifier configured — set an API key or load the on-device model)`);
+    if (r.nul_gated) reasons.push(`${r.nul_gated} NUL-gated (the heuristic saw no transformation)`);
+    return `Ingested "${r.file}" — 0 events added despite ${r.clauses} clauses. ${reasons.join(' · ') || 'Reason unclear — check the Uploads tab for the stage-by-stage breakdown.'}`;
+  }
+  return `Ingested "${r.file}" — ${r.emitted} events added across ${r.clauses} clauses. Open the Uploads tab to see each stage.`;
 }
 
 /* ═══ Rendering ═══════════════════════════════════════════════════════ */
@@ -285,6 +357,7 @@ function renderShell() {
     <div class="chat-shell">
       <div id="chat-status" class="chat-status"></div>
       <div id="local-banner" class="local-banner"></div>
+      <div id="mode-banner" class="mode-banner"></div>
       <div id="chat-messages" class="chat-messages"></div>
       <div id="chat-composer-row" class="chat-composer-row">
         <div class="chat-dropzone" id="chat-dropzone">
@@ -384,13 +457,16 @@ function renderMessage(msg) {
   const mechHTML = msg.role === 'assistant' && !msg.error ? renderMechanism(msg) : '';
   const warnHTML = msg.warnings && msg.warnings.length ? renderWarnings(msg) : '';
   const body = escapeHTML(msg.text).replace(/\n/g, '<br>');
+  const uploadLink = msg.doc_id
+    ? `<button class="msg-open-uploads" data-open-uploads="${escapeHTML(msg.doc_id)}">Open in Uploads ▸</button>`
+    : '';
   return `<div class="msg ${roleClass}${errorClass}${nulClass}${loadingClass}" data-msg-id="${msg.id}">
     <div class="msg-body">${body}</div>
     ${warnHTML}
     ${adjHTML}
     ${mechHTML}
     ${receiptHTML}
-    <div class="msg-meta"><span class="msg-ts">${tsL}</span></div>
+    <div class="msg-meta"><span class="msg-ts">${tsL}</span>${uploadLink}</div>
   </div>`;
 }
 
@@ -470,6 +546,12 @@ function renderAdjudications(msg) {
 }
 
 function attachMessageHandlers() {
+  document.querySelectorAll('[data-open-uploads]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-open-uploads');
+      openInspectorToUploads(id);
+    });
+  });
   document.querySelectorAll('[data-adj-pick]').forEach(btn => {
     btn.addEventListener('click', async () => {
       const mid = +btn.getAttribute('data-msg-id');
@@ -519,6 +601,22 @@ function attachMessageHandlers() {
   });
 }
 
+function openInspectorToUploads(doc_id) {
+  focusDoc(doc_id);
+  const aside = document.getElementById('inspector');
+  if (aside && !aside.classList.contains('open')) {
+    aside.classList.add('open');
+    aside.setAttribute('aria-hidden', 'false');
+  }
+  // Switch tab
+  document.querySelectorAll('.inspector-tabs .tab').forEach(t => {
+    t.classList.toggle('active', t.getAttribute('data-tab') === 'uploads');
+  });
+  document.querySelectorAll('.tab-panel').forEach(p => {
+    p.classList.toggle('active', p.getAttribute('data-tab-panel') === 'uploads');
+  });
+}
+
 function scrollToBottom() {
   const el = document.getElementById('chat-messages');
   if (!el) return;
@@ -546,10 +644,27 @@ function renderLocalBanner() {
   if (!el) return;
 
   if (localReady()) {
+    const opts = listModels().map(m =>
+      `<option value="${escapeHTML(m.key)}" ${m.key === currentModelKey() ? 'selected' : ''}>${escapeHTML(m.label)} · ~${m.sizeGB.toFixed(1)} GB${m.backend === 'mlx' ? ' · MLX' : ''}</option>`
+    ).join('');
     el.innerHTML = `<div class="local-banner-row ready">
       <span class="dot ok"></span>
       <span>On-device AI · ${escapeHTML(currentModelLabel() || 'ready')}</span>
+      <select id="local-swap-select" class="local-model-select" aria-label="Swap model">${opts}</select>
+      <button class="local-banner-btn" id="local-swap-btn">Swap</button>
     </div>`;
+    document.getElementById('local-swap-btn')?.addEventListener('click', async () => {
+      const sel = document.getElementById('local-swap-select');
+      if (!sel) return;
+      const target = sel.value;
+      if (target === currentModelKey()) return;
+      try {
+        await switchModel(target);
+        pushSystemMessage(`On-device AI swapped to ${currentModelLabel()}.`);
+      } catch(e) {
+        pushSystemMessage(`Swap failed: ${e.message || e}`, { error: true });
+      }
+    });
     return;
   }
 
@@ -589,6 +704,28 @@ function renderLocalBanner() {
     setPreferredModel(e.target.value);
   });
   document.getElementById('local-enable-btn')?.addEventListener('click', startLocalLoad);
+}
+
+/* ═══ Mode banner (LLM-only ↔ EO-pipeline) ════════════════════════════ */
+
+function renderModeBanner() {
+  const el = document.getElementById('mode-banner');
+  if (!el) return;
+  const mode = getMode();
+  el.innerHTML = `
+    <div class="mode-banner-row">
+      <span class="caption">mode</span>
+      <div class="mode-toggle" role="group" aria-label="Runtime mode">
+        <button class="mode-opt ${mode === 'eo' ? 'on' : ''}" data-mode="eo">EO pipeline</button>
+        <button class="mode-opt ${mode === 'llm-only' ? 'on' : ''}" data-mode="llm-only">LLM only</button>
+      </div>
+      <span class="caption mode-note">${mode === 'eo'
+        ? 'Uploads run the nine-stage helix · chat routes through the operator stack'
+        : 'Uploads extract text only · chat prompts the on-device model directly'}</span>
+    </div>`;
+  el.querySelectorAll('[data-mode]').forEach(b => {
+    b.addEventListener('click', () => setMode(b.getAttribute('data-mode')));
+  });
 }
 
 async function startLocalLoad() {

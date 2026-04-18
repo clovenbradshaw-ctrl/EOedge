@@ -10,6 +10,7 @@ import { openDB, subscribe } from './store.js';
 import { initUI, refreshAll, pushProposal } from './ui.js';
 import { initChat, pushSystemMessage } from './chat.js';
 import { start as startFold } from './fold.js';
+import { initUploadPanel } from './upload-panel.js';
 
 let refreshPending = false;
 function refresh() {
@@ -40,6 +41,9 @@ async function main() {
     onClassify: refresh,
     onRefresh: refresh
   });
+
+  // Uploads panel — projection over upload-log, live helix-stage status.
+  initUploadPanel();
 
   // Wire inspector open/close
   wireInspector();
