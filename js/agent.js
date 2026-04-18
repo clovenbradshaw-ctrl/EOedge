@@ -38,23 +38,33 @@ AVAILABLE TOOLS:
 ${lines}
 
 TOOL-CALL PROTOCOL:
-- To call a tool, respond with ONE line of raw JSON and nothing else:
-  {"tool": "<name>", "args": { ... }}
-- No code fences, no prose before or after. The JSON line must be the entire response.
-- To answer without a tool, respond in plain prose (no JSON).
-- After a tool result is provided, narrate it in prose — do not emit another JSON call in the same turn.`;
+- To call a tool, respond with ONE line of raw JSON and nothing else, shaped exactly like this example:
+  {"name": "find_events", "arguments": {"time": "yesterday"}}
+- No code fences, no <tool_call> tags, no prose before or after — the JSON object must be the entire response.
+- To answer without a tool, respond in plain prose only (no JSON anywhere).
+- After a tool result arrives, narrate it in one or two short sentences of prose. Do not emit another JSON call in the same turn.`;
 }
 
 function parsePromptToolCall(content) {
   if (!content) return null;
   let text = String(content).trim();
+
+  // Strip Qwen's native <tool_call>…</tool_call> wrapper if the model falls
+  // back to its trained function-calling format.
+  const tagged = text.match(/<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/i);
+  if (tagged) text = tagged[1].trim();
+
+  // Strip a single fenced code block.
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
   if (fenced) text = fenced[1].trim();
+
   let parsed = null;
   try { parsed = JSON.parse(text); } catch(e) {}
+
   if (!parsed) {
-    // Scan for the first balanced object containing "tool".
-    const start = text.search(/\{[\s\S]*?"tool"\s*:/);
+    // Scan for the first balanced object that names a tool under any of the
+    // common keys (tool / name / tool_name / function).
+    const start = text.search(/\{[\s\S]*?"(?:tool|name|tool_name|function)"\s*:/);
     if (start >= 0) {
       let depth = 0, inStr = false, esc = false;
       for (let i = start; i < text.length; i++) {
@@ -74,14 +84,21 @@ function parsePromptToolCall(content) {
       }
     }
   }
-  if (!parsed || typeof parsed.tool !== 'string') return null;
-  const args = parsed.args ?? parsed.arguments ?? {};
+
+  if (!parsed) return null;
+  const toolName = parsed.tool || parsed.name || parsed.tool_name || parsed.function;
+  if (typeof toolName !== 'string') return null;
+
+  const rawArgs = parsed.args ?? parsed.arguments ?? parsed.parameters ?? {};
+  let argsStr;
+  if (typeof rawArgs === 'string') argsStr = rawArgs;
+  else {
+    try { argsStr = JSON.stringify(rawArgs); } catch(e) { argsStr = '{}'; }
+  }
+
   return {
     id: `call-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    function: {
-      name: parsed.tool,
-      arguments: typeof args === 'string' ? args : JSON.stringify(args)
-    }
+    function: { name: toolName, arguments: argsStr }
   };
 }
 

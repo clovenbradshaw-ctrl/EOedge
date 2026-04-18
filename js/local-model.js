@@ -32,6 +32,9 @@ let _engine = null;
 let _loading = null;
 let _modelKey = null;
 let _progressListeners = new Set();
+// Model IDs that claimed native tool support but were rejected by WebLLM at
+// runtime — we demote them to prompt-based dispatch for the rest of the session.
+const _demotedFromNative = new Set();
 
 export function listModels() {
   return Object.entries(MODELS).map(([key, m]) => ({ key, ...m }));
@@ -68,7 +71,10 @@ export function currentModelLabel() {
 
 export function supportsNativeTools() {
   if (!_modelKey) return false;
-  return NATIVE_TOOL_MODEL_IDS.has(MODELS[_modelKey]?.id);
+  const id = MODELS[_modelKey]?.id;
+  if (!id) return false;
+  if (_demotedFromNative.has(id)) return false;
+  return NATIVE_TOOL_MODEL_IDS.has(id);
 }
 
 export function onProgress(listener) {
@@ -152,9 +158,12 @@ export async function complete({ messages, tools, tool_choice = 'auto', temperat
   try {
     resp = await _engine.chat.completions.create(req);
   } catch(e) {
-    // Safety net: if the selected model rejects the tools field, drop it and retry.
+    // Safety net: if the selected model rejects the tools field, demote it
+    // for the rest of the session and retry without tools.
     const msg = e?.message || String(e);
     if (req.tools && /not supported for ChatCompletionRequest\.tools/i.test(msg)) {
+      const id = MODELS[_modelKey]?.id;
+      if (id) _demotedFromNative.add(id);
       delete req.tools;
       delete req.tool_choice;
       resp = await _engine.chat.completions.create(req);
