@@ -124,7 +124,33 @@ async function openFile(name) {
   if (name) fileName = name;
   const root = await navigator.storage.getDirectory();
   const fh = await root.getFileHandle(fileName, { create: true });
-  handle = await fh.createSyncAccessHandle();
+
+  // A prior page session (e.g. a reload while the worker was still holding
+  // the handle) or another live tab can leave the SyncAccessHandle briefly
+  // unavailable. Back off and retry — the browser usually releases an
+  // orphaned handle within a second or two.
+  const backoffs = [0, 150, 300, 600, 1200, 2400];
+  let lastErr = null;
+  for (const wait of backoffs) {
+    if (wait) await new Promise(r => setTimeout(r, wait));
+    try {
+      handle = await fh.createSyncAccessHandle();
+      lastErr = null;
+      break;
+    } catch (e) {
+      lastErr = e;
+      if (!isAccessHandleBusy(e)) throw e;
+    }
+  }
+  if (lastErr) {
+    const err = new Error(
+      'Storage is already open in another tab of this site. Close other tabs and reload.'
+    );
+    err.code = 'OPFS_HANDLE_BUSY';
+    err.cause = lastErr;
+    throw err;
+  }
+
   const size = handle.getSize();
   if (size >= HEADER_SIZE) {
     loadFromFile(size);
@@ -135,11 +161,18 @@ async function openFile(name) {
   return { opened: true, name: fileName, size, events: eventsCount };
 }
 
+function isAccessHandleBusy(e) {
+  if (!e) return false;
+  if (e.name === 'InvalidStateError' || e.name === 'NoModificationAllowedError') return true;
+  const msg = String(e.message || e);
+  return msg.includes('Access Handle') || msg.includes('another open');
+}
+
 async function closeFile() {
   if (!handle) return { closed: true };
   if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-  flushIfDirty(true);
-  handle.close();
+  try { flushIfDirty(true); } catch(e) { /* best-effort */ }
+  try { handle.close(); } catch(e) { /* already closed */ }
   handle = null;
   return { closed: true };
 }

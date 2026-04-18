@@ -28,11 +28,7 @@ async function main() {
     await openDB();
     if (bootSub) bootSub.textContent = 'Storage ready · mounting chat';
   } catch(e) {
-    document.body.innerHTML = `<div style="padding:40px;font-family:serif;max-width:640px;margin:40px auto;line-height:1.6;">
-      <h1 style="color:#B84A62;">Storage unavailable</h1>
-      <p>EO Local requires OPFS. This browser session doesn't seem to allow it (private mode with strict settings, cross-origin iframe, or storage entirely disabled).</p>
-      <p style="color:#666;font-size:14px;font-family:monospace;">${e.message || e}</p>
-    </div>`;
+    renderStorageError(e);
     return;
   }
 
@@ -72,6 +68,26 @@ async function main() {
 
   console.log('%cEO Local %cchat · inspector · fold ready',
     'font-weight:600;color:#0A7E8C;', 'color:#666;');
+}
+
+function renderStorageError(err) {
+  const msg = err?.message || String(err);
+  const busy = err?.code === 'OPFS_HANDLE_BUSY' ||
+               /Access Handle|another open|InvalidStateError/i.test(msg);
+
+  const title = busy ? 'Storage is locked' : 'Storage unavailable';
+  const body = busy
+    ? `<p>EO Local is already open in another tab of this site. Close the other tab(s), then reload.</p>
+       <p style="color:#666;">If you're sure no other tab is open, the previous session may still be releasing the file — reload in a few seconds.</p>`
+    : `<p>EO Local requires OPFS. This browser session doesn't seem to allow it (private mode with strict settings, cross-origin iframe, or storage entirely disabled).</p>`;
+
+  document.body.innerHTML = `<div style="padding:40px;font-family:serif;max-width:640px;margin:40px auto;line-height:1.6;">
+      <h1 style="color:#B84A62;">${title}</h1>
+      ${body}
+      <p><button id="storage-retry" style="font:inherit;padding:8px 16px;background:#0A7E8C;color:#fff;border:0;border-radius:4px;cursor:pointer;">Reload</button></p>
+      <p style="color:#666;font-size:14px;font-family:monospace;white-space:pre-wrap;">${msg}</p>
+    </div>`;
+  document.getElementById('storage-retry')?.addEventListener('click', () => location.reload());
 }
 
 function wireInspector() {

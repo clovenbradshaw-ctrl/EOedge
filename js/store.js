@@ -56,13 +56,25 @@ export async function openDB() {
   if (openPromise) return openPromise;
   openPromise = (async () => {
     startWorker();
-    await call('open', { name: 'default.eodb' });
+    try {
+      await call('open', { name: 'default.eodb' });
+    } catch (e) {
+      // Failed to grab the access handle — discard the worker so a retry
+      // (e.g. after the user closes the other tab) can create a fresh one.
+      openPromise = null;
+      try { worker?.terminate(); } catch(_) {}
+      worker = null;
+      throw e;
+    }
     opened = true;
 
-    // Best-effort flush on page hide / unload
-    const flush = () => { try { call('flush', {}); } catch(e) {} };
-    window.addEventListener('pagehide', flush);
-    window.addEventListener('beforeunload', flush);
+    // On page hide, release the access handle so a subsequent tab or reload
+    // doesn't hit "Access Handles cannot be created".
+    const release = () => {
+      try { call('close', {}); } catch(e) {}
+    };
+    window.addEventListener('pagehide', release);
+    window.addEventListener('beforeunload', release);
 
     return true;
   })();
